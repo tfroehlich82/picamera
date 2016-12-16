@@ -40,7 +40,27 @@ Framerate adjustments, as done with :attr:`~PiCamera.framerate_delta` are
 achieved by manipulating the number of "padding" lines added to the end of a
 frame.
 
-The other important factor influencing sensor counts, other than line read-out
+At this point, a reader familiar with operating system theory may be
+questioning how a non-real-time operating system like Linux could possibly be
+reading lines from the sensor? After all, to ensure each line is read in
+exactly the same amount of time (to ensure a constant exposure over the whole
+image) would require precision timing, which cannot be guaranteed in a
+non-real-time OS. The answer is quite simply that Linux *doesn't* control the
+sensor.
+
+In fact, none of the camera processing occurs on the CPU at all.  Instead, it
+is done on the Pi's GPU (VideoCore IV) which is running its own real-time OS
+(VCOS). From the Linux side we merely send "messages" to VCOS requesting that
+it do certain things (initialize the camera, set an exposure time, configure a
+JPEG encoder, begin streaming data), and from time to time VCOS sends messages
+back (e.g. here's a frame of JPEG encoded data).
+
+The diagram below roughly illustrates the architecture of the system:
+
+.. image:: images/camera_architecture.*
+    :align: center
+
+The other important factor influencing sensor counts, aside from line read-out
 time, is the sensor's gain. Specifically, the gain given the by
 :attr:`~PiCamera.analog_gain` attribute. The corresponding
 :attr:`~PiCamera.digital_gain` attribute refers to a manipulation of the sensor
@@ -93,7 +113,7 @@ time:
     >>> camera.exposure_speed
     3318
 
-Now, force the camera to use a higher gain by setting ISO too 800. If you have
+Now, force the camera to use a higher gain by setting ISO to 800. If you have
 the preview running, you'll see very little difference in the scene. However,
 if you subsequently query the exposure time you'll find the firmware has
 drastically reduced it to compensate for the higher sensor gain:
