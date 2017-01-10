@@ -1641,7 +1641,7 @@ class MMALConnection(MMALObject):
 
     The connection will automatically negotiate the most efficient format
     supported by both ports (implicitly handling the incompatibility of some
-    OPAQUE sub-formats). See :ref:`under_the_hood` for more information.
+    OPAQUE sub-formats). See :ref:`mmal` for more information.
     """
     __slots__ = ('_connection',)
 
@@ -1724,6 +1724,16 @@ class MMALConnection(MMALObject):
             return '<MMALConnection "%s">' % self.name
         else:
             return '<MMALConnection closed>'
+
+
+class MMALRawCamera(MMALBaseComponent):
+    """
+    The MMAL raw camera component.
+    """
+    __slots__ = ()
+    component_type = mmal.MMAL_COMPONENT_RAW_CAMERA
+    opaque_input_subformats = ()
+    opaque_output_subformats = ('OPQV-single',)
 
 
 class MMALCamera(MMALBaseComponent):
@@ -1940,6 +1950,18 @@ class MMALSplitter(MMALComponent):
     opaque_output_subformats = ('OPQV-single',) * 4
 
 
+class MMALConverter(MMALComponent):
+    """
+    Represents the MMAL ISP component. This component has 1 input port and
+    1 output port, and supports conversion of numerous formats into numerous
+    other formats (e.g. OPAQUE to RGB, etc).
+    """
+    __slots__ = ()
+    component_type = mmal.MMAL_COMPONENT_DEFAULT_ISP
+    opaque_input_subformats = ('OPQV-single',)
+    opaque_output_subformats = (None,)
+
+
 class MMALResizer(MMALComponent):
     """
     Represents the MMAL resizer component. This component has 1 input port and
@@ -1994,7 +2016,7 @@ class MMALDecoder(MMALComponent):
 class MMALVideoDecoder(MMALDecoder):
     """
     Represents the MMAL video decoder component. This component has 1 input
-    port and ? output ports. The input port is usually configured with
+    port and 1 output port. The input port is usually configured with
     ``MMAL_ENCODING_H264`` or ``MMAL_ENCODING_MJPEG``.
     """
     __slots__ = ()
