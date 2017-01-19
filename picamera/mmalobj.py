@@ -2016,7 +2016,7 @@ class MMALDecoder(MMALComponent):
 class MMALVideoDecoder(MMALDecoder):
     """
     Represents the MMAL video decoder component. This component has 1 input
-    port and ? output ports. The input port is usually configured with
+    port and 1 output port. The input port is usually configured with
     ``MMAL_ENCODING_H264`` or ``MMAL_ENCODING_MJPEG``.
     """
     __slots__ = ()
@@ -2986,5 +2986,6 @@ class MMALPythonConnection(MMALObject):
 
     def __repr__(self):
         return '<MMALPythonConnection "%s">' % self.name
+
 
 

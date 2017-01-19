@@ -10,6 +10,13 @@ The following recipes should be reasonably accessible to Python programmers of
 all skill levels. Please feel free to suggest enhancements or additional
 recipes.
 
+.. warning::
+
+    When trying out these scripts do *not* name your file :file:`picamera.py`.
+    Naming scripts after existing Python modules will cause errors when you
+    try and import those modules (because Python checks the current directory
+    before checking other paths).
+
 
 .. _file_capture:
 
@@ -22,8 +29,8 @@ the output of whatever :meth:`~PiCamera.capture` method you require:
 .. literalinclude:: examples/file_capture.py
 
 Note that files opened by picamera (as in the case above) will be flushed and
-closed so that when the capture method returns, the data should be accessible
-to other processes.
+closed so that when the :meth:`~PiCamera.capture` method returns, the data
+should be accessible to other processes.
 
 
 .. _stream_capture:
@@ -471,10 +478,10 @@ contrast with the :attr:`~PiCamera.annotate_background` attribute):
 Controlling the LED
 ===================
 
-In certain circumstances, you may find the camera module's red LED a hindrance.
-For example, in the case of automated close-up wild-life photography, the LED
-may scare off animals. It can also cause unwanted reflected red glare with
-close-up subjects.
+In certain circumstances, you may find the V1 camera module's red LED a
+hindrance (the V2 camera module lacks an LED). For example, in the case of
+automated close-up wild-life photography, the LED may scare off animals. It can
+also cause unwanted reflected red glare with close-up subjects.
 
 One trivial way to deal with this is simply to place some opaque covering on
 the LED (e.g. blue-tack or electricians tape). Another method is to use the

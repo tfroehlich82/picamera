@@ -9,6 +9,13 @@ Advanced Recipes
 The following recipes involve advanced techniques and may not be "beginner
 friendly". Please feel free to suggest enhancements or additional recipes.
 
+.. warning::
+
+    When trying out these scripts do *not* name your file :file:`picamera.py`.
+    Naming scripts after existing Python modules will cause errors when you
+    try and import those modules (because Python checks the current directory
+    before checking other paths).
+
 
 .. _array_capture:
 
@@ -65,7 +72,7 @@ Capturing to an OpenCV object
 
 This is a variation on :ref:`array_capture`. `OpenCV`_ uses numpy arrays as
 images and defaults to colors in planar BGR. Hence, the following is all that's
-required to capture an OpenCV compatible image (under Python 3.x):
+required to capture an OpenCV compatible image:
 
 .. literalinclude:: examples/opencv_capture.py
 
