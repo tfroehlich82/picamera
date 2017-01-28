@@ -483,7 +483,8 @@ class PiCamera(object):
         # video recordings and captures where use_video_port=True to occur
         # simultaneously (#26)
         self._splitter = mo.MMALSplitter()
-        self._splitter.connect(self._camera.outputs[self.CAMERA_VIDEO_PORT])
+        self._splitter.inputs[0].connect(
+                self._camera.outputs[self.CAMERA_VIDEO_PORT]).enable()
 
     def _init_preview(self):
         # Create a null-sink component, enable it and connect it to the
@@ -963,6 +964,9 @@ class PiCamera(object):
         * *sei* - When ``True``, specifies the encoder should include
           "Supplemental Enhancement Information" within the output stream.
           Defaults to ``False`` if not specified.
+
+        * *sps_timing* - When ``True`` the encoder includes the camera's
+          framerate in the SPS header. Defaults to ``False`` if not specified.
 
         * *motion_output* - Indicates the output destination for motion vector
           estimation data. When ``None`` (the default), motion data is not
