@@ -54,7 +54,7 @@ from .exc import (
     mmal_check,
     PiCameraValueError,
     PiCameraDeprecated,
-    PiCameraMMALError,
+    PiCameraPortDisabled,
     )
 
 
@@ -478,6 +478,14 @@ class PiBayerArray(PiArrayOutput):
             self.array = self._to_3d(self.array)
 
     def demosaic(self):
+        """
+        Perform a rudimentary `de-mosaic`_ of ``self.array``, returning the
+        result as a new array. The result of the demosaic is *always* three
+        dimensional, with the last dimension being the color planes (see
+        *output_dims* parameter on the constructor).
+
+        .. _de-mosaic: http://en.wikipedia.org/wiki/Demosaicing
+        """
         if self._demo is None:
             # Construct 3D representation of Bayer data (if necessary)
             if self.output_dims == 2:
@@ -827,7 +835,7 @@ class PiArrayTransform(mo.MMALPythonComponent):
     component, then place it in your MMAL pipeline as you would a normal
     encoder.
     """
-    __slots__ = ('_formats',)
+    __slots__ = ()
 
     def __init__(self, formats=('rgb', 'bgr', 'rgba', 'bgra')):
         super(PiArrayTransform, self).__init__()
@@ -836,7 +844,7 @@ class PiArrayTransform(mo.MMALPythonComponent):
         if isinstance(formats, str):
             formats = (formats,)
         try:
-            self._formats = {
+            formats = {
                 {
                     'rgb': mmal.MMAL_ENCODING_RGB24,
                     'bgr': mmal.MMAL_ENCODING_BGR24,
@@ -848,15 +856,14 @@ class PiArrayTransform(mo.MMALPythonComponent):
         except KeyError as e:
             raise PiCameraValueError(
                 'PiArrayTransform cannot handle format %s' % str(e))
-
-    def _commit_port(self, port):
-        if port.type == 'in' and port.format.value not in self._formats:
-            raise PiCameraMMALError(mmal.MMAL_EINVAL, 'invalid format')
-        super(PiArrayTransform, self)._commit_port(port)
+        self.inputs[0].supported_formats = formats
+        self.outputs[0].supported_formats = formats
 
     def _callback(self, port, source_buf):
-        result = False
-        target_buf = self.outputs[0].get_buffer(False)
+        try:
+            target_buf = self.outputs[0].get_buffer(False)
+        except PiCameraPortDisabled:
+            return False
         if target_buf:
             target_buf.copy_meta(source_buf)
             result = self.transform(
@@ -864,14 +871,9 @@ class PiArrayTransform(mo.MMALPythonComponent):
                 MMALArrayBuffer(self.outputs[0], target_buf._buf))
             try:
                 self.outputs[0].send_buffer(target_buf)
-            except PiCameraMMALError as e:
-                if e.status != mmal.MMAL_EINVAL:
-                    raise
-                # MMAL_EINVAL here means we're sending to a disabled port which
-                # also means we're about to shut down so disable further
-                # callbacks
-                return True
-        return result
+            except PiCameraPortDisabled:
+                return False
+        return False
 
     def transform(self, source, target):
         """

@@ -162,8 +162,9 @@ class PiEncoder(object):
 
     .. attribute:: resizer
 
-        The :class:`~mmalobj.MMALResizer` component, or ``None`` if no resizer
-        component has been created.
+        The :class:`~mmalobj.MMALISPResizer` component (or
+        :class:`~mmalobj.MMALResizer` on older firmwares), or ``None`` if no
+        resizer component has been created.
     """
 
     DEBUG = 0
@@ -189,16 +190,18 @@ class PiEncoder(object):
             self._create_encoder(format, **options)
             if self.encoder:
                 if self.resizer:
-                    self.encoder.connect(self.resizer.outputs[0])
+                    self.encoder.inputs[0].connect(self.resizer.outputs[0]).enable()
                 else:
-                    self.encoder.connect(self.input_port)
+                    self.encoder.inputs[0].connect(self.input_port).enable()
         except:
             self.close()
             raise
 
     def _create_resizer(self, width, height):
         """
-        Creates and configures an :class:`~mmalobj.MMALResizer` component.
+        Creates and configures an :class:`~mmalobj.MMALISPResizer` component
+        (or :class:`~mmalobj.MMALResizer` if the firmware doesn't support
+        the ISP component).
 
         This is called when the initializer's *resize* parameter is something
         other than ``None``. The *width* and *height* parameters are passed to
@@ -206,8 +209,12 @@ class PiEncoder(object):
         resizer - it does not connect it to the encoder. The method sets the
         :attr:`resizer` attribute to the constructed resizer component.
         """
-        self.resizer = mo.MMALResizer()
-        self.resizer.connect(self.input_port)
+        try:
+            self.resizer = mo.MMALISPResizer()
+        except PiCameraMMALError as e:
+            if e.errno == mmal.MMAL_ENOSYS:
+                self.resizer = mo.MMALResizer()
+        self.resizer.inputs[0].connect(self.input_port).enable()
         self.resizer.outputs[0].copy_from(self.resizer.inputs[0])
         self.resizer.outputs[0].format = mmal.MMAL_ENCODING_I420
         self.resizer.outputs[0].framesize = (width, height)
@@ -501,25 +508,30 @@ class PiRawMixin(PiEncoder):
                         "using a resizer to perform non-YUV encoding; "
                         "upgrading your firmware with sudo rpi-update "
                         "may improve performance"))
-        # Workaround: If a non-alpha format is requested with the resizer, use
-        # the alpha-inclusive format and set a flag to get the callback to
-        # strip the alpha bytes
+        # Workaround: If a non-alpha format is requested with the resizer, and
+        # the ISPResizer isn't available (due to an old firmware) use the
+        # alpha-inclusive format and set a flag to get the callback to strip
+        # the alpha bytes
         self._strip_alpha = False
         if resize:
             width, height = resize
             try:
-                format = {
-                    'rgb': 'rgba',
-                    'bgr': 'bgra',
-                    }[format]
-                self._strip_alpha = True
-                warnings.warn(
-                    PiCameraAlphaStripping(
-                        "using alpha-stripping to convert to non-alpha "
-                        "format; you may find the equivalent alpha format "
-                        "faster"))
-            except KeyError:
-                pass
+                mo.MMALISPResizer().close()
+            except PiCameraMMALError as e:
+                if e.errno == mmal.MMAL_ENOSYS:
+                    try:
+                        format = {
+                            'rgb': 'rgba',
+                            'bgr': 'bgra',
+                            }[format]
+                        self._strip_alpha = True
+                        warnings.warn(
+                            PiCameraAlphaStripping(
+                                "using alpha-stripping with old resizer; "
+                                "upgrading your firmware with sudo rpi-update "
+                                "may improve performance"))
+                    except KeyError:
+                        pass
         else:
             width, height = input_port.framesize
         # Workaround (#83): when the resizer is used the width must be aligned
@@ -596,8 +608,9 @@ class PiVideoEncoder(PiEncoder):
 
     def _create_encoder(
             self, format, bitrate=17000000, intra_period=None, profile='high',
-            quantization=0, quality=0, inline_headers=True, sei=False,
-            motion_output=None, intra_refresh=None, level='4'):
+            level='4', quantization=0, quality=0, inline_headers=True,
+            sei=False, sps_timing=False, motion_output=None,
+            intra_refresh=None):
         """
         Extends the base :meth:`~PiEncoder._create_encoder` implementation to
         configure the video encoder for H.264 or MJPEG output.
@@ -740,6 +753,8 @@ class PiVideoEncoder(PiEncoder):
                 self.output_port.params[mmal.MMAL_PARAMETER_VIDEO_ENCODE_INLINE_HEADER] = True
             if sei:
                 self.output_port.params[mmal.MMAL_PARAMETER_VIDEO_ENCODE_SEI_ENABLE] = True
+            if sps_timing:
+                self.output_port.params[mmal.MMAL_PARAMETER_VIDEO_ENCODE_SPS_TIMING] = True
             if motion_output is not None:
                 self.output_port.params[mmal.MMAL_PARAMETER_VIDEO_ENCODE_INLINE_VECTORS] = True
 

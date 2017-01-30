@@ -57,7 +57,7 @@ MMAL operates on the principle of pipelines:
     port.
 
   - Finally, all ports (control, input and output) have parameters
-    (:attr:`~MMALControlPort.params`) which control their operation.
+    (:attr:`~MMALControlPort.params`) which affect their operation.
 
 * An output port can have a connection to an input port
   (:class:`MMALConnection`). Connections ensure the two ports use compatible
@@ -192,25 +192,45 @@ The renderer is what ``mmalobj`` terms a "downstream component". This is a
 component with a single input that typically sits downstream from some feeder
 component (like a camera). All such components have the
 :meth:`MMALComponent.connect` method which can be used to connect the
-sole input to the specified output port:
+sole input to a specified output:
 
 .. code-block:: pycon
 
-    >>> preview.connect(camera.outputs[0])
+    >>> preview.connect(camera)
+    <MMALConnection "vc.ril.camera:out:0/vc.ril.video_render:in:0">
+    >>> preview.connection.enable()
+
+Note that we've been quite lazy in the snippet above by simply calling
+:meth:`MMALComponent.connect` with the ``camera`` component. In this case, a
+connection will be attempted between the first input port of the owner
+(``preview``) and the *first unconnected* output of the parameter (``camera``).
+However, this is not always what's wanted so you can specify the exact ports
+you wish to connect. In this case the example was equivalent to calling:
+
+.. code-block:: pycon
+
+    >>> preview.inputs[0].connect(camera.outputs[0])
+    <MMALConnection "vc.ril.camera:out:0/vc.ril.video_render:in:0">
+    >>> preview.inputs[0].connection.enable()
+
+As soon as the connection is enabled you should see the camera preview appear
+on the Pi's screen. Let's query the port configurations now:
+
+.. code-block:: pycon
+
     >>> camera.outputs[0]
     <MMALVideoPort "vc.ril.camera:out:0(OPQV)": format=MMAL_FOURCC('OPQV') buffers=10x128 frames=640x480@30fps>
     >>> preview.inputs[0]
     <MMALVideoPort "vc.ril.video_render:in:0(OPQV)": format=MMAL_FOURCC('OPQV') buffers=10x128 frames=640x480@30fps>
 
-As soon as the connection is complete you should see the camera preview appear
-on the Pi's screen. One interesting thing to note is that the connection has
-implicitly reconfigured the camera's output port to use the OPAQUE ("OPQV")
-format. This is a special format used internally by the camera firmware which
-avoids passing complete frame data around, instead passing pointers to frame
-data around (this explains the tiny buffer size of 128 bytes as very little
-data is actually being shuttled between the components). Note also that the
-connection has automatically copied the port format, frame size and frame-rate
-to the preview's input port.
+One interesting thing to note is that the connection has implicitly
+reconfigured the camera's output port to use the OPAQUE ("OPQV") format. This
+is a special format used internally by the camera firmware which avoids passing
+complete frame data around, instead passing pointers to frame data around (this
+explains the tiny buffer size of 128 bytes as very little data is actually
+being shuttled between the components). Note also that the connection has
+automatically copied the port format, frame size and frame-rate to the
+preview's input port.
 
 .. image:: images/preview_pipeline.*
     :align: center
@@ -238,7 +258,7 @@ three output ports:
   resolution images efficiently.
 
 Generally, you don't need to worry about these differences. The ``mmalobj``
-layer knows about them and auto-negotiates the most efficient format it can for
+layer knows about them and negotiates the most efficient format it can for
 connections. However, they're worth bearing in mind if you're aiming to get the
 most out of the firmware or if you're confused about why a particular format
 has been selected for a connection.
@@ -303,6 +323,10 @@ Things to note:
 * The easiest way to use such "structured" parameters is to query them first,
   modify the resulting structure, then write it back to the parameter.
 
+To find out what parameters are available for use with the camera component,
+have a look at the source for the :class:`~picamera.PiCamera` class, especially
+property getters and setters.
+
 
 File Output (RGB capture)
 -------------------------
@@ -321,31 +345,24 @@ activate the output port:
     >>> camera.outputs[2]
     <MMALVideoPort "vc.ril.camera:out:2(RGB3)": format=MMAL_FOURCC('RGB3') buffers=1x921600 frames=640x480@0fps>
     >>> camera.outputs[2].enable()
-    Traceback (most recent call last):
-      File "<stdin>", line 1, in <module>
-      File "/home/pi/picamera/picamera/mmalobj.py", line 919, in enable
-        super(MMALPort, self).enable()
-      File "/home/pi/picamera/picamera/mmalobj.py", line 684, in enable
-        mmal.mmal_port_enable(self._port, self._wrapper),
-    ctypes.ArgumentError: argument 2: <class 'TypeError'>: expected CFunctionType instance instead of NoneType
 
-Unfortunately, activating an output port is slightly more complex than it
-sounds!
+Unfortunately, that didn't seem to do much! An output port that is
+participating in a connection needs nothing more: it knows where its data is
+going. However, an output port *without* a connection requires a callback
+function to be assigned so that something can be done with the buffers of data
+it produces.
 
-An output port that is participating in a connection needs nothing more: it
-knows where it's data is going. However, an output port *without* a connection
-requires a callback function to be assigned so that something can be done with
-the data it produces. The callback will take two parameters: the
-:class:`MMALPort` responsible for producing the data, and the
-:class:`MMALBuffer` containing the data. It is expected to return a
-:class:`bool` which will be ``False`` if further data is expected and ``True``
-if no further data is expected. If ``True`` is returned, the callback will not
-be executed again. In our case we're going to write data out to a file we'll
-open before-hand, and we should return ``True`` when we see a buffer with the
-"frame end" flag set:
+The callback will be given two parameters: the :class:`MMALPort` responsible
+for producing the data, and the :class:`MMALBuffer` containing the data. It is
+expected to return a :class:`bool` which will be ``False`` if further data is
+expected and ``True`` if no further data is expected. If ``True`` is returned,
+the callback will not be executed again. In our case we're going to write data
+out to a file we'll open before-hand, and we should return ``True`` when we see
+a buffer with the "frame end" flag set:
 
 .. code-block:: pycon
 
+    >>> camera.outputs[2].disable()
     >>> import io
     >>> output = io.open('image.data', 'wb')
     >>> def image_callback(port, buf):
@@ -462,6 +479,8 @@ from earlier and just assign a different output file to ``jpg_data``:
 .. code-block:: pycon
 
     >>> encoder.connect(camera.outputs[2])
+    <MMALConnection "vc.ril.camera:out:2/vc.ril.image_encode:in:0">
+    >>> encoder.connection.enable()
     >>> encoder.inputs[0]
     <MMALVideoPort "vc.ril.image_encode:in:0(OPQV)": format=MMAL_FOURCC('OPQV') buffers=10x128 frames=640x480@0fps>
     >>> jpg_data = io.open('direct.jpg', 'wb')
@@ -470,7 +489,7 @@ from earlier and just assign a different output file to ``jpg_data``:
     >>> camera.outputs[2].params[mmal.MMAL_PARAMETER_CAPTURE] = False
     >>> jpg_data.tell()
     99328
-    >>> camera.outputs[2].disable()
+    >>> encoder.connection.disable()
     >>> jpg_data.close()
 
 Now the state of our system looks like this:
@@ -561,6 +580,7 @@ it'll dump a human-readable version of your pipeline leading up to that port:
      vc.ril.camera [2]                           [0] vc.ril.image_encode [0]
        encoding    OPQV-strips    -->    OPQV-strips      encoding       JPEG
           buf      10x128                     10x128         buf         1x307200
+        bitrate    0bps                         0bps       bitrate       0bps
          frame     640x480@0fps         640x480@0fps        frame        0x0@0fps
 
 
@@ -593,9 +613,10 @@ providing the source and target buffers as numpy arrays containing RGB data:
     >>> from picamera import array
     >>> class Crosshair(array.PiArrayTransform):
     ...     def transform(self, source, target):
-    ...         target.array = source.array
-    ...         target.array[240, :, :] = 0xff
-    ...         target.array[:, 320, :] = 0xff
+    ...         with source as sdata, target as tdata:
+    ...             tdata[...] = sdata
+    ...             tdata[240, :, :] = 0xff
+    ...             tdata[:, 320, :] = 0xff
     ...         return False
     ...
     >>> transform = Crosshair()
@@ -607,8 +628,13 @@ and the renderer:
 
 .. code-block:: pycon
 
-    >>> transform.connect(camera.outputs[0])
-    >>> preview.connect(transform.outputs[0])
+    >>> transform.connect(camera)
+    <MMALPythonConnection "vc.ril.camera.out:0(RGB3)/py.component:in:0">
+    >>> preview.connect(transform)
+    <MMALPythonConnection "py.component:out:0/vc.ril.video_render:in:0(RGB3)">
+    >>> transform.connection.enable()
+    >>> preview.connection.enable()
+    >>> transform.enable()
 
 At this point we should take a look at the pipeline to see what's been
 configured automatically:
@@ -628,16 +654,16 @@ alluded to above: RGB is a very large format (compared to I420 which is half
 its size, or OPQV which is tiny) so we're shuttling a *lot* of data around
 here. Expect this to drop frames at higher resolutions or framerates.
 
-The other part of inefficiency isn't obvious from the debug output above which
-gives the impression that the "py.transform" component is actually part of the
-MMAL pipeline. In fact, this is a lie. Under the covers ``mmalobj`` installs an
-output callback on the camera's output port to feed data to the "py.transform"
-input port, uses a background thread to run the transform, then copies the
-results into buffers obtained from the preview's input port. In other words
-there's really *two* (very short) MMAL pipelines with a hunk of Python running
-in between them. If ``mmalobj`` does its job properly you shouldn't need to
-worry about this implementation detail but it's worth bearing in mind from the
-perspective of performance.
+The other source of inefficiency isn't obvious from the debug output above
+which gives the impression that the "py.transform" component is actually part
+of the MMAL pipeline. In fact, this is a lie. Under the covers ``mmalobj``
+installs an output callback on the camera's output port to feed data to the
+"py.transform" input port, uses a background thread to run the transform, then
+copies the results into buffers obtained from the preview's input port. In
+other words there's really *two* (very short) MMAL pipelines with a hunk of
+Python running in between them. If ``mmalobj`` does its job properly you
+shouldn't need to worry about this implementation detail but it's worth bearing
+in mind from the perspective of performance.
 
 
 Performance Hints
@@ -648,26 +674,32 @@ frames they've got to run in less than a frame's time (e.g.  33ms at 30fps).
 Bear in mind that a significant amount of time is going to be spent shuttling
 the huge RGB frames around so you've actually got much less than 33ms available
 to you (how much will depend on the speed of your Pi, what resolution you're
-using, the what framerate, etc).
+using, the framerate, etc).
 
-It's a sensible idea to perform any overlay rendering you want to do in a
-separate thread and then just handle compositing your overlay onto the frame in
-the transform callback. Anything you can do to avoid buffer copying is a bonus
-here.
-
-Sometimes that can even mean making unintuitive choices. For example, the
+Sometimes, performance can mean making unintuitive choices. For example, the
 `Pillow library`_ (the main imaging library in Python these days) can construct
 images which share buffer memory (see ``Image.frombuffer``), but only for the
-grayscale and RGBA formats, not RGB. Hence, it can make sense to use RGBA (a
-format even larger than RGB) if only because it allows you to avoid copying
-any data when performing a composite.
+indexed (grayscale) and RGBA formats, not RGB. Hence, it can make sense to use
+RGBA (a format even larger than RGB) if only because it allows you to avoid
+copying any data when performing a composite.
 
 Another trick is to realize that although YUV420 has different sized planes,
 it's often enough to manipulate the Y plane only. In that case you can treat
-the front of the buffer as a grayscale image (remember that Pillow can share
+the front of the buffer as an indexed image (remember that Pillow can share
 buffer memory with such images) and manipulate that directly. With tricks like
 these it's possible to perform multiple composites in realtime at 720p30 on a
 Pi3.
+
+Here's a (heavily commented) variant of the cross-hair example above that uses
+the lower level :class:`MMALPythonComponent` class instead, and the `Pillow
+library`_ to perform compositing on YUV420 in the manner just described:
+
+.. literalinclude:: examples/mmal_crosshair.py
+
+It's a sensible idea to perform any overlay rendering you want to do in a
+separate thread and then just handle compositing your overlay onto the frame in
+the transform's callback method. Anything you can do to avoid buffer copying is
+a bonus here.
 
 Here's a final (rather large) demonstration that puts all these things together
 to construct a :class:`MMALPythonComponent` derivative with two purposes:
@@ -679,7 +711,7 @@ to construct a :class:`MMALPythonComponent` derivative with two purposes:
    this is a demonstration of how Python components can have multiple outputs
    too).
 
-.. literalinclude:: examples/mmal_python_transform.py
+.. literalinclude:: examples/mmal_clock_splitter.py
 
 
 .. _YUV420: https://en.wikipedia.org/wiki/YUV#Y.E2.80.B2UV420p_.28and_Y.E2.80.B2V12_or_YV12.29_to_RGB888_conversion
@@ -713,10 +745,10 @@ Components
 .. autoclass:: MMALSplitter
     :show-inheritance:
 
-.. autoclass:: MMALConverter
+.. autoclass:: MMALResizer
     :show-inheritance:
 
-.. autoclass:: MMALResizer
+.. autoclass:: MMALISPResizer
     :show-inheritance:
 
 .. autoclass:: MMALEncoder
@@ -767,13 +799,18 @@ Ports
 Connections
 ===========
 
-.. autoclass:: MMALConnection
+.. autoclass:: MMALBaseConnection
+
+.. autoclass:: MMALConnection(source, target, formats=default_formats, callback=None)
+    :show-inheritance:
 
 
 Buffers
 =======
 
 .. autoclass:: MMALBuffer
+
+.. autoclass:: MMALQueue
 
 .. autoclass:: MMALPool
 
@@ -791,9 +828,10 @@ Python Extensions
 
 .. autoclass:: MMALPythonComponent
     :show-inheritance:
-    :private-members: _callback, _commit_port, _accept_formats
+    :private-members: _callback, _commit_port
 
-.. autoclass:: MMALPythonConnection
+.. autoclass:: MMALPythonConnection(source, target, formats=default_formats, callback=None)
+    :show-inheritance:
 
 .. autoclass:: MMALPythonSource
     :show-inheritance:

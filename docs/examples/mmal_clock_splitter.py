@@ -5,7 +5,7 @@ from collections import namedtuple
 from math import sin, cos, pi
 from time import sleep
 
-from picamera import mmal, mmalobj as mo, PiCameraMMALError
+from picamera import mmal, mmalobj as mo, PiCameraPortDisabled
 from PIL import Image, ImageDraw
 
 
@@ -45,17 +45,24 @@ class Coord(namedtuple('Coord', ('x', 'y'))):
 class ClockSplitter(mo.MMALPythonComponent):
     def __init__(self):
         super(ClockSplitter, self).__init__(name='py.clock', outputs=2)
+        self.inputs[0].supported_formats = {mmal.MMAL_ENCODING_I420}
         self._lock = Lock()
         self._clock_image = None
         self._clock_thread = None
 
-    def _commit_port(self, port):
-        # only accept I420 format on the input port
-        if port.type == 'in':
-            self._accept_formats(port, mmal.MMAL_ENCODING_I420)
-        # the super call will take care of the rest (copying input format
-        # to outputs, checking output formats match input)
-        super(ClockSplitter, self)._commit_port(port)
+    def enable(self):
+        super(ClockSplitter, self).enable()
+        self._clock_thread = Thread(target=self._clock_run)
+        self._clock_thread.daemon = True
+        self._clock_thread.start()
+
+    def disable(self):
+        super(ClockSplitter, self).disable()
+        if self._clock_thread:
+            self._clock_thread.join()
+            self._clock_thread = None
+            with self._lock:
+                self._clock_image = None
 
     def _clock_run(self):
         # draw the clock face up front (no sense drawing that every time)
@@ -85,8 +92,11 @@ class ClockSplitter(mo.MMALPythonComponent):
             sleep(0.2)
 
     def _callback(self, port, buf):
-        out1 = self.outputs[0].get_buffer(False)
-        out2 = self.outputs[1].get_buffer(False)
+        try:
+            out1 = self.outputs[0].get_buffer(False)
+            out2 = self.outputs[1].get_buffer(False)
+        except PiCameraPortDisabled:
+            return True
         if out1:
             # copy the input frame to the first output buffer
             out1.copy_from(buf)
@@ -94,7 +104,7 @@ class ClockSplitter(mo.MMALPythonComponent):
                 # construct an Image using the Y plane of the output
                 # buffer's data and tell PIL we can write to the buffer
                 img = Image.frombuffer('L', port.framesize, data, 'raw', 'L', 0, 1)
-                img.readonly = 0
+                img.readonly = False
                 with self._lock:
                     if self._clock_image:
                         img.paste(self._clock_image, (10, 10), self._clock_image)
@@ -105,34 +115,14 @@ class ClockSplitter(mo.MMALPythonComponent):
                 out2.replicate(out1)
             try:
                 self.outputs[0].send_buffer(out1)
-            except PiCameraMMALError as e:
-                # if EINVAL occurs here the port's shutting down so stop
-                # the callbacks anyway
-                if e.status != mmal.MMAL_EINVAL:
-                    raise
+            except PiCameraPortDisabled:
                 return True
         if out2:
             try:
                 self.outputs[1].send_buffer(out2)
-            except PiCameraMMALError as e:
-                if e.status != mmal.MMAL_EINVAL:
-                    raise
+            except PiCameraPortDisabled:
                 return True
         return False
-
-    def enable(self):
-        super(ClockSplitter, self).enable()
-        self._clock_thread = Thread(target=self._clock_run)
-        self._clock_thread.daemon = True
-        self._clock_thread.start()
-
-    def disable(self):
-        super(ClockSplitter, self).disable()
-        if self._clock_thread:
-            self._clock_thread.join()
-            self._clock_thread = None
-            with self._lock:
-                self._clock_image = None
 
 
 def main(output_filename):
@@ -140,6 +130,7 @@ def main(output_filename):
     preview = mo.MMALRenderer()
     encoder = mo.MMALVideoEncoder()
     clock = ClockSplitter()
+    target = mo.MMALPythonTarget(output_filename)
 
     # Configure camera output 0
     camera.outputs[0].framesize = (640, 480)
@@ -159,22 +150,33 @@ def main(output_filename):
     encoder.outputs[0].params[mmal.MMAL_PARAMETER_VIDEO_ENCODE_INITIAL_QUANT] = 22
     encoder.outputs[0].params[mmal.MMAL_PARAMETER_VIDEO_ENCODE_MAX_QUANT] = 22
     encoder.outputs[0].params[mmal.MMAL_PARAMETER_VIDEO_ENCODE_MIN_QUANT] = 22
-    output = io.open(output_filename, 'wb')
-    def output_callback(port, buf):
-        output.write(buf.data)
-        return bool(buf.flags & mmal.MMAL_BUFFER_HEADER_FLAG_EOS)
 
-    # Connect everything up (no need to enable capture on camera port 0)
-    clock.connect(camera.outputs[0])
-    preview.connect(clock.outputs[0])
-    encoder.connect(clock.outputs[1])
-    encoder.outputs[0].enable(output_callback)
+    # Connect everything up and enable everything (no need to enable capture on
+    # camera port 0)
+    clock.inputs[0].connect(camera.outputs[0])
+    preview.inputs[0].connect(clock.outputs[0])
+    encoder.inputs[0].connect(clock.outputs[1])
+    target.inputs[0].connect(encoder.outputs[0])
+    target.connection.enable()
+    encoder.connection.enable()
+    preview.connection.enable()
+    clock.connection.enable()
+    target.enable()
+    encoder.enable()
+    preview.enable()
+    clock.enable()
     try:
         sleep(10)
     finally:
-        preview.disconnect()
-        encoder.disconnect()
-        clock.disconnect()
+        # Disable everything and tear down the pipeline
+        target.disable()
+        encoder.disable()
+        preview.disable()
+        clock.disable()
+        target.inputs[0].disconnect()
+        encoder.inputs[0].disconnect()
+        preview.inputs[0].disconnect()
+        clock.inputs[0].disconnect()
 
 
 if __name__ == '__main__':
