@@ -91,6 +91,8 @@ pygments_style = 'sphinx'
 #modindex_common_prefix = []
 #keep_warnings = False
 imgmath_image_format = 'svg'
+if on_rtd:
+    tags.add('rtd')
 
 # -- Autodoc configuration ------------------------------------------------
 
@@ -116,7 +118,7 @@ else:
     #html_theme_options = {}
     #html_theme_path = []
     #html_sidebars = {}
-#html_title = None
+html_title = '%s %s Documentation' % (project, version)
 #html_short_title = None
 #html_logo = None
 #html_favicon = None
@@ -142,28 +144,42 @@ def setup(app):
 
 # -- Options for LaTeX output ---------------------------------------------
 
+#latex_engine = 'pdflatex'
+
 latex_elements = {
     'papersize': 'a4paper',
     'pointsize': '10pt',
-    #'preamble': '',
+    'preamble': r'\def\thempfootnote{\arabic{mpfootnote}}', # workaround sphinx issue #2530
 }
 
 latex_documents = [
     (
         'index',                       # source start file
         '%s.tex' % _setup.__project__, # target filename
-        '%s Documentation' % project,  # title
+        '%s %s Documentation' % (project, version), # title
         _setup.__author__,             # author
         'manual',                      # documentclass
+        True,                          # documents ref'd from toctree only
         ),
 ]
 
 #latex_logo = None
 #latex_use_parts = False
-#latex_show_pagerefs = False
-#latex_show_urls = False
+latex_show_pagerefs = True
+latex_show_urls = 'footnote'
 #latex_appendices = []
 #latex_domain_indices = True
+
+# -- Options for epub output ----------------------------------------------
+
+epub_basename = _setup.__project__
+#epub_theme = 'epub'
+#epub_title = html_title
+epub_author = _setup.__author__
+epub_identifier = 'https://picamera.readthedocs.io/'
+#epub_tocdepth = 3
+epub_show_urls = 'no'
+#epub_use_index = True
 
 # -- Options for manual page output ---------------------------------------
 
@@ -179,3 +195,9 @@ texinfo_documents = []
 #texinfo_domain_indices = True
 #texinfo_show_urls = 'footnote'
 #texinfo_no_detailmenu = False
+
+# -- Options for linkcheck builder ----------------------------------------
+
+linkcheck_retries = 3
+linkcheck_workers = 20
+linkcheck_anchors = True

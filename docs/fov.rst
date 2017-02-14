@@ -6,10 +6,9 @@ Camera Hardware
 
 .. currentmodule:: picamera
 
-This chapter provides an overview of how the camera works
-under various conditions, as well as an introduction to the software interface that picamera uses.
-
-.. Just so you know, if any of the changes I have made seem to be personal preference, or just plain unnessary, the reason I have made them is to ensure that the document doesn't contain too many more rarely used English words, idioms etc.. Basically so that people who do have have English as a first language have a fighting chance of understanding it.
+This chapter provides an overview of how the camera works under various
+conditions, as well as an introduction to the software interface that picamera
+uses.
 
 .. _operations:
 
@@ -27,20 +26,20 @@ Misconception #1
 ----------------
 
 The Pi's camera module is basically a mobile phone camera module. Mobile phone
-digital cameras differ from larger, more expensive, camerals (`DSLRs`_) in a
+digital cameras differ from larger, more expensive, cameras (`DSLRs`_) in a
 few respects. The most important of these, for understanding the Pi's camera,
 is that many mobile cameras (including the Pi's camera module) use a `rolling
-shutter`_ to capture images. When the camera needs to capture a frame, it reads
-out pixels from the sensor a row at a time rather than capturing all pixel
-values at once.
+shutter`_ to capture images. When the camera needs to capture an image, it
+reads out pixels from the sensor a row at a time rather than capturing all
+pixel values at once.
 
-In fact, the "global shutter" on DSLRs typically also read out pixels a row at
+In fact, the "global shutter" on DSLRs typically also reads out pixels a row at
 a time. The major difference is that a DSLR will have a physical shutter that
 covers the sensor.  Hence in a DSLR the procedure for capturing an image is to
 open the shutter, letting the sensor "view" the scene, close the shutter, then
 read out each line from the sensor.
 
-The notion of "capturing a frame" is thus a bit misleading as what we actually
+The notion of "capturing an image" is thus a bit misleading as what we actually
 mean is "reading each row from the sensor in turn and assembling them back into
 an image".
 
@@ -50,8 +49,8 @@ Misconception #2
 The notion that the camera is effectively idle until we tell it to capture a
 frame is also misleading. Don't think of the camera as a still image camera.
 Think of it as a video camera. Specifically one that, as soon as it is
-initialized, is constantly streaming frames (or rows of frames) down the ribbon
-cable to the Pi for processing.
+initialized, is constantly streaming frames (or rather rows of frames) down the
+ribbon cable to the Pi for processing.
 
 The camera may seem idle, and your script may be doing nothing with the camera,
 but still numerous tasks are going on in the background (automatic gain
@@ -62,7 +61,7 @@ This background processing is why most of the picamera example scripts seen in
 prior chapters include a ``sleep(2)`` line after initializing the camera. The
 ``sleep(2)`` statement pauses your script for a couple of seconds. During this
 pause, the camera's firmware continually receives rows of frames from the
-camera and adjusts the sensor's gain and exposure times to make the image look
+camera and adjusts the sensor's gain and exposure times to make the frame look
 "normal" (not over- or under-exposed, etc).
 
 So when we request the camera to "capture a frame" what we're really requesting
@@ -73,7 +72,7 @@ background otherwise).
 Exposure time
 -------------
 
-What does the camera sensor *actually detect*? Quite simply photon counts; the
+What does the camera sensor *actually detect*? It detects photon counts; the
 more photons that hit the sensor elements, the more those elements increment
 their counters.  As our camera has no physical shutter (unlike a DSLR) we can't
 prevent light falling on the elements and incrementing the counts. In fact we
@@ -228,8 +227,8 @@ Sensor elements --> Frame 1
 3 3 3 3 3 3 3 3 --> 3 3 3 3 3 3 3 3
 = = = = = = = = === = = = = = = = =
 
-At this stage, Frame 1 would be sent off for processing and Frame 2 would be
-read into a new buffer:
+At this stage, Frame 1 would be sent off for post-processing and Frame 2 would
+be read into a new buffer:
 
 = = = = = = = = === = = = = = = = =
 Sensor elements --> Frame 2
@@ -245,42 +244,71 @@ Sensor elements --> Frame 2
 = = = = = = = = === = = = = = = = =
 
 From the example above it should be clear that we can control the exposure time
-of an image by varying the delay between resetting a line and reading it (reset
+of a frame by varying the delay between resetting a line and reading it (reset
 and read don't really happen simultaneously, but they are synchronized which is
 all that matters for this process).
 
-However, there are naturally limits: reading out a line of elements must take a
-certain minimum time. For example, if there are 500 rows on our hypothetical
-sensor, and reading each row takes a minimum of 20ns then it will take a
-minimum of :math:`500 \times 20\text{ns} = 10\text{ms}` to read
-a full image. This is the *minimum* exposure time of our hypothetical sensor.
+Minimum exposure time
+~~~~~~~~~~~~~~~~~~~~~
 
-If it takes 10ms to read a full image, then we cannot capture more than
-:math:`\frac{1\text{s}}{10\text{ms}} = \frac{1\text{s}}{0.01\text{s}} =
-100` images in a second. Hence the maximum framerate of our hypothetical 500
+There are naturally limits to the minimum exposure time: reading out a line of
+elements must take a certain minimum time. For example, if there are 500 rows
+on our hypothetical sensor, and reading each row takes a minimum of 20ns then
+it will take a minimum of :math:`500 \times 20\text{ns} = 10\text{ms}` to read
+a full frame. This is the *minimum* exposure time of our hypothetical sensor.
+
+Maximum framerate is determined by the minimum exposure time
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The framerate is the number of frames the camera can capture per second.
+Depending on the time it takes to capture one frame, the exposure time, we can
+only capture so many frames in a specific amount of time. For example, if it
+takes 10ms to read a full frame, then we cannot capture more
+than :math:`\frac{1\text{s}}{10\text{ms}} = \frac{1\text{s}}{0.01\text{s}} =
+100` frames in a second. Hence the maximum framerate of our hypothetical 500
 row sensor is 100fps.
 
-Conversely, if the camera's :attr:`~PiCamera.framerate` is set to a certain
-value, it necessarily limits the amount of time available for exposing images.
-For example, if we set the framerate to 30fps, then we cannot spend more than
-:math:`\frac{1\text{s}}{30} = 33^1/_3\text{ms}` capturing any given frame.
+This can be expressed in the word equation:
+:math:`\frac{1\text{s}}{\text{min exposure time in s}} = \text{max framerate in
+fps}` from which we can see the inverse relationship. The lower the minimum
+exposure time, the larger the maximum framerate and vice versa.
 
-The *maximum* exposure time is thus governed by the camera's *minimum*
-framerate. This, in turn, is largely dictated by how slow the sensor can be
-made to read lines (at the hardware level this is down to the size of registers
-for holding things like line read-out times). If we imagine that the minimum
-framerate of our hypothetical sensor is ½fps then the maximum exposure time
-will be :math:`\frac{1\text{s}}{^1/_2} = 2\text{s}`.
+Maximum exposure time is determined by the minimum framerate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Hence, the :attr:`~PiCamera.exposure_speed` attribute, which reports the
-exposure time of the last processed frame, and which is really a multiple of
-the sensor's line read-out time, is limited by the camera's
+To maximise the exposure time we need to capture as few frames as possible per
+second, i.e. we need a very low framerate.  Therefore the *maximum* exposure
+time is determined by the camera's *minimum* framerate. The minimum framerate
+is largely determined by how slow the sensor can be made to read lines (at the
+hardware level this is down to the size of registers for holding things like
+line read-out times).
+
+This can be expression in the word equation:
+:math:`\frac{1\text{s}}{\text{min framerate in fps}} = \text{max exposure time
+in s}`
+
+If we imagine that the minimum framerate of our hypothetical sensor is ½fps
+then the maximum exposure time will be :math:`\frac{1\text{s}}{^1/_2} =
+2\text{s}`.
+
+Exposure time is limited by current framerate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+More generally, the :attr:`~PiCamera.framerate` setting of the camera limits
+the maximum exposure time of a given frame. For example, if we set the
+framerate to 30fps, then we cannot spend more than :math:`\frac{1\text{s}}{30}
+= 33^1/_3\text{ms}` capturing any given frame.
+
+Therefore, the :attr:`~PiCamera.exposure_speed` attribute, which reports the
+exposure time of the last processed frame (which is really a multiple of
+the sensor's line read-out time) is limited by the camera's
 :attr:`~PiCamera.framerate`.
 
 .. note::
 
-    Tiny framerate adjustments, as done with :attr:`~PiCamera.framerate_delta`,
-    are achieved by reading extra "dummy" lines at the end of a frame.
+    Tiny framerate adjustments, done with :attr:`~PiCamera.framerate_delta`,
+    are achieved by reading extra "dummy" lines at the end of a frame. I.e
+    reading a line but then discarding it.
 
 Sensor gain
 -----------
@@ -290,7 +318,7 @@ read-out time, is the sensor's `gain`_. Specifically, the gain given by the
 :attr:`~PiCamera.analog_gain` attribute (the corresponding
 :attr:`~PiCamera.digital_gain` is simply post-processing which we'll cover
 later). However, there's an obvious issue: how is this gain "analog" if we're
-dealing with simple digital photon counts?
+dealing with digital photon counts?
 
 Time to reveal the first lie: the sensor elements are not simple digital
 counters but are in fact analog components that build up charge as more photons
@@ -308,15 +336,16 @@ attributes can be used to "influence" it.
   attributes may be adjusted.
 
 * Setting :attr:`~PiCamera.exposure_mode` to values other than ``'off'``
-  permits the gains to "float" according to the auto-exposure mode selected.
-  The camera firmware always prefers to adjust the analog gain when possible,
-  as digital gain produces more noise. Some examples of the factors that the
-  auto-exposure modes target:
+  permits the gains to "float" (change) according to the auto-exposure mode
+  selected.  Where possible, the camera firmware prefers to adjust the analog
+  gain rather than the digital gain, because increasing the digital gain
+  produces more noise. Some examples of the adjustments made for different
+  auto-exposure modes include:
 
-  - ``'sports'`` prefers higher gain to increasing exposure time (i.e. line
-    read-out time) to reduce motion blur.
+  - ``'sports'`` reduces motion blur by preferentially increasing gain rather
+    than exposure time (i.e. line read-out time).
 
-  - ``'night'`` is intended as a stills mode so it permits very long exposure
+  - ``'night'`` is intended as a stills mode, so it permits very long exposure
     times while attempting to keep gains low.
 
 * The :attr:`~PiCamera.iso` attribute effectively represents another set of
@@ -325,20 +354,20 @@ attributes can be used to "influence" it.
   - With the V1 camera module, ISO 100 attempts to use an overall gain of 1.0.
     ISO 200 attempts to use an overall gain of 2.0, and so on.
 
-  - With the V2 camera module, calibration was performed against the relevant
-    standard. Hence ISO 100 produces an overall gain of ~1.84. ISO 60 produces
-    overall gain of 1.0, and ISO 800 of 14.72.
+  - With the V2 camera module, ISO 100 produces an overall gain of ~1.84. ISO
+    60 produces overall gain of 1.0, and ISO 800 of 14.72 (the V2 camera module
+    was calibrated against the `ISO film speed`_ standard).
 
 .. note::
 
     Camera sensors tend to have a border of non-sensing pixels (elements that
     are covered from light). These are used to determine what level of charge
-    represents "optically black".
+    represents "optically black". 
 
     The camera's elements are affected by heat (thermal radiation, after all,
     is just part of the `electromagnetic spectrum`_ close to the visible
-    portion) which would result in different black levels at different ambient
-    temperatures if such compensation were not performed.
+    portion). Without the non-sensing pixels you would get different black
+    levels at different ambient temperatures.
 
 Division of labor
 -----------------
@@ -347,7 +376,7 @@ At this point, a reader familiar with operating system theory may be
 questioning how a non `real-time operating system`_ (non-RTOS) like Linux could
 possibly be reading lines from the sensor? After all, to ensure each line is
 read in exactly the same amount of time (to ensure a constant exposure over the
-whole image) would require extremely precise timing, which cannot be achieved
+whole frame) would require extremely precise timing, which cannot be achieved
 in a non-RTOS.
 
 Time to reveal the second lie: lines are not actively "read" from the sensor.
@@ -372,27 +401,21 @@ real-time OS (VCOS).
     think of the GPU as running something called VCOS (without thinking too
     much about what that actually is).
 
-The diagram below roughly illustrates the architecture of the system:
+The following diagram illustrates that the BCM2835 `system on a chip`_ (SoC) is
+comprised of an ARM Cortex CPU running Linux (under which is running
+``myscript.py`` which is using picamera), and a VideoCore IV GPU running VCOS.
+The VideoCore Host Interface (VCHI) is a message passing system provided to
+permit communication between these two components. The available RAM is split
+between the two components (128Mb is a typical GPU memory split when using the
+camera).  Finally, the camera module is shown above the SoC. It is connected to
+the SoC via a CSI-2 interface (providing 2Gbps of bandwidth).
 
-.. image:: images/camera_architecture.*
-    :align: center
+The scenario depicted is as follows:
 
-The diagram illustrates that the BCM2835 `system on a chip`_ (SoC) is comprised
-of an ARM Cortex part running Linux (under which is running ``myscript.py``
-which is using picamera), and a VideoCore IV part running VCOS. The VideoCore
-Host Interface (VCHI) is a message passing system provided to permit
-communication between these two components. The available RAM is split between
-the two components (128Mb is a typical GPU memory split when using the camera).
-Finally, the OV5647 component is the V1 camera module. It is connected to the
-SoC via a 2-lane MIPI CSI-2 interface (this provides 1Gbps of bandwidth per
-lane).
+1. The camera's sensor has been configured and is continually streaming frame
+   lines over the CSI-2 interface to the GPU.
 
-Walking through the scenario depicted:
-
-1. The OV5647 sensor has been configured and is streaming image lines over the
-   CSI-2 interface to the GPU.
-
-2. The GPU is assembling complete image buffers from these lines and performing
+2. The GPU is assembling complete frame buffers from these lines and performing
    post-processing on these buffers (we'll go into further detail about this
    part in the next section).
 
@@ -403,94 +426,95 @@ Walking through the scenario depicted:
    (actually there's quite a lot of MMAL calls that go on here but for the sake
    of simplicity we represent all this with a single arrow).
 
-5. The MMAL API sends a message over VCHI requesting an image capture (again,
+5. The MMAL API sends a message over VCHI requesting a frame capture (again,
    in reality there's a lot more activity than a single message).
 
-6. In response, the GPU initiates a DMA transfer of the next complete image
+6. In response, the GPU initiates a `DMA`_ transfer of the next complete frame
    from its portion of RAM to the CPU's portion.
 
 7. Finally, the GPU sends a message back over VCHI that the capture is
    complete.
 
 8. This causes an MMAL thread to fire a callback in the picamera library, which
-   in turn retrieves the image data (in reality, this requires more MMAL and
-   VCHI activity) and finally calls ``write`` on the output object provided by
+   in turn retrieves the frame (in reality, this requires more MMAL and VCHI
+   activity).
+
+9. Finally, picamera calls ``write`` on the output object provided by
    ``myscript.py``.
+
+.. image:: images/camera_architecture.*
+    :align: center
 
 Background processes
 --------------------
 
 We've alluded briefly to some of the GPU processing going on in the sections
-above (gain control, exposure time, white balance, image encoding, etc). Time
+above (gain control, exposure time, white balance, frame encoding, etc). Time
 to reveal the final lie: the GPU is not, as depicted in the prior section, one
-monolithic component. Rather it is composed of numerous components each of
-which play a role in the camera's operation.
+discrete component. Rather it is composed of numerous components each of which
+play a role in the camera's operation.
 
-The diagram below depicts a more accurate representation of the GPU side of
-the BCM2835 SoC:
+The diagram below depicts a more accurate representation of the GPU side of the
+BCM2835 SoC. From this we get our first glimpse of the frame processing
+"pipeline" and why it is called such. In the diagram above, an H264 video is
+being recorded. The components that data passes through are as follows:
 
-.. image:: images/gpu_architecture.*
-    :align: center
-
-From this we get our first glimpse of the image processing "pipeline" and why
-it is called such. In the diagram above, an H264 video is being recorded. The
-components that data passes through are as follows:
-
-1. Starting on the OV5647 some minor processing happens. Specifically, flips
-   (horizontal and vertical), line skipping, and pixel `binning`_ is configured
-   on the sensor's registers. Pixel binning actually happens on the sensor
-   itself, prior to the ADC to improve signal-to-noise ratios. See
+1. Starting at the camera module, some minor processing happens. Specifically,
+   flips (horizontal and vertical), line skipping, and pixel `binning`_ are
+   configured on the sensor's registers. Pixel binning actually happens on the
+   sensor itself, prior to the ADC to improve signal-to-noise ratios. See
    :attr:`~PiCamera.hflip`, :attr:`~PiCamera.vflip`, and
    :attr:`~PiCamera.sensor_mode`.
 
-2. As described previously, image line data is streamed over the CSI-2
-   interface to the GPU. There, it is received by the Unicam component which
-   writes the line data into RAM.
+2. As described previously, frame lines are streamed over the CSI-2 interface
+   to the GPU. There, it is received by the Unicam component which writes the
+   line data into RAM.
 
 3. Next the GPU's `image signal processor`_ (ISP) performs several
-   post-processing steps on the frame data.  These include (in order):
+   post-processing steps on the frame data(?).  
 
-    - Transposition. If any rotation has been requested, transpose the input to
-      take care of it (rotation is always implemented by some combination of
+   These include (in order):
+
+    - **Transposition**: If any rotation has been requested, the input is transposed to
+      rotate the image (rotation is always implemented by some combination of
       transposition and flips).
 
-    - Black level compensation. Camera sensors typically include a border of
-      non-light sensing elements which are used to determine what level of
+    - **Black level compensation**: Use the non-light sensing elements (typically in a covered border) to determine what level of
       charge represents "optically black".
 
-    - Lens shading. The camera firmware includes a table that corrects for
+    - **Lens shading**: The camera firmware includes a table that corrects for
       chromatic distortion from the standard module's lens. This is one reason
-      that third party modules incorporating different lenses may show
-      non-uniform color across a frame.
+      why third party modules incorporating different lenses may show
+      non-uniform color across a frame (across an image?).
 
-    - White balance. The red and blue gains are applied to correct the `color
+    - **White balance**: The red and blue gains are applied to correct the `color
       balance`_. See :attr:`~PiCamera.awb_gains` and
       :attr:`~PiCamera.awb_mode`.
 
-    - Digital gain. As mentioned above, this is a straight-forward
-      post-processing step that applies a gain to the Bayer values. See
+    - **Digital gain**: As mentioned above, this is a straight-forward
+      post-processing step that applies a gain to the Bayer values (? -link?). See
       :attr:`~PiCamera.digital_gain`.
 
-    - Bayer de-noise. This is a noise reduction algorithm run on the image
+    - **Bayer de-noise**: This is a noise reduction algorithm run on the frame
       data while it is still in Bayer format.
 
-    - De-mosaic. The frame data is converted from Bayer format to `YUV420`_
+    - **De-mosaic:** The frame data is converted from Bayer format to `YUV420`_
       which is the format used by the remainder of the pipeline.
 
-    - YCbCr de-noise. Another noise reduction algorithm, this time with the
-      image in YUV420 format. See :attr:`~PiCamera.image_denoise` and
+    - **YCbCr de-noise**: Another noise reduction algorithm, this time with the
+      frame in YUV420 format. See :attr:`~PiCamera.image_denoise` and
       :attr:`~PiCamera.video_denoise`.
 
-    - Sharpening. An algorithm to enhance edges in the image. See
+    - **Sharpening**: An algorithm to enhance edges in the image. See
       :attr:`~PiCamera.sharpness`.
 
-    - Color processing. The :attr:`~PiCamera.brightness`,
+    - **Color processing**: The :attr:`~PiCamera.brightness`,
       :attr:`~PiCamera.contrast`, and :attr:`~PiCamera.saturation` adjustments
       are implemented.
 
-    - Distortion. The distortion introduced by the camera's lens is corrected.
+    - **Distortion**: The distortion introduced by the camera's lens is corrected.
 
-    - Resizing. At this point, the image is resized to the requested output
+    - **Resizing**: At this point, the frame is resized to the requested output
       resolution (all prior stages have been performed on "full" frame data
       at whatever resolution the sensor is configured to produce). See
       :attr:`~PiCamera.resolution`.
@@ -498,25 +522,32 @@ components that data passes through are as follows:
    Some of these steps can be controlled directly (e.g. brightness, noise
    reduction), others can only be influenced (e.g. digital gain), and the
    remainder are not user-configurable at all (e.g. demosaic and lens shading).
+   
+   At this point the frame is effectively “complete”.
+   
+.. Do you mean analog gain in the above, rather than digital?
 
-4. At this point the frame is effectively "complete". When dealing with
-   pipelines producing "unencoded" output (YUV, RGB, etc.) the pipeline ends
-   here (the ISP might be used to convert to RGB, but that's all) with the
-   frame data getting copied over to the CPU.
+4. If you are producing "unencoded" output (YUV, RGB, etc.) the pipeline ends
+   at this point, with the frame data getting copied over to the CPU via
+   `DMA`_. The ISP might be used to convert to RGB, but that's all.
 
-5. In the case of pipelines producing encoded output (H264, MJPEG, MPEG2, etc.)
-   the next step is one of the encoding blocks (the H264 block in this case).
+5. If you are producing encoded output (H264, MJPEG, MPEG2, etc.)
+   the next step is one of the encoding blocks, the H264 block in this case.
    The encoding blocks are specialized hardware designed specifically to
    produce particular encodings. For example, the JPEG block will include
    hardware for performing lots of parallel `discrete cosine transforms`_
    (DCTs), while the H264 block will include hardware for performing `motion
    estimation`_.
 
-6. Above these components is the VPU; this is the general purpose component in
-   the GPU running VCOS (ThreadX), and it is this that configures and controls
-   the other components in response to messages from VCHI. Currently the most
-   complete documentation of the VPU is available from the `videocoreiv
-   repository`_.
+6. Once encoded, the output is copied to the CPU via `DMA`_.
+
+7. Coordinating these components is the VPU, the general purpose component in
+   the GPU running VCOS (ThreadX). The VPU configures and controls the other
+   components in response to messages from VCHI.  Currently the most complete
+   documentation of the VPU is available from the `videocoreiv repository`_.
+
+.. image:: images/gpu_architecture.*
+    :align: center
 
 Feedback loops
 --------------
@@ -913,13 +944,20 @@ MMAL framework). However, not all OPAQUE encodings are equivalent:
   single image OPAQUE input (or YUV; in later firmwares it also
   supports RGB or BGR output).
 
-* The resizer theoretically accepts OPAQUE input (though the author hasn't
-  managed to get this working at the time of writing) but will only produce
-  YUV/RGBA/BGRA output.
+* The VPU resizer (:class:`~picamera.mmalobj.MMALResizer`) theoretically
+  accepts OPAQUE input (though the author hasn't managed to get this working at
+  the time of writing) but will only produce YUV, RGBA, and BGRA output, not
+  RGB or BGR.
+
+* The ISP resizer (:class:`~picamera.mmalobj.MMALISPResizer`, not currently
+  used by picamera's high level API, but available from the
+  :mod:`~picamera.mmalobj` layer) accepts OPAQUE input, and will produce almost
+  any unencoded output (including YUV, RGB, BGR, RGBA, and BGRA) but not
+  OPAQUE.
 
 The :mod:`~picamera.mmalobj` layer introduced in picamera 1.11 is aware of
 these OPAQUE encoding differences and attempts to configure connections between
-components with the most efficient formats possible. However, it is not aware
+components using the most efficient formats possible. However, it is not aware
 of firmware revisions so if you're playing with MMAL components via this layer
 be prepared to do some tinkering to get your pipeline working.
 
@@ -941,12 +979,12 @@ abstraction layers which necessarily obscure (but hopefully simplify) the
 .. _system on a chip: https://en.wikipedia.org/wiki/System_on_a_chip
 .. _image signal processor: https://en.wikipedia.org/wiki/Image_processor
 .. _binning: http://www.andor.com/learning-academy/ccd-binning-what-does-binning-mean
-.. _rolling shutter: http://en.wikipedia.org/wiki/Rolling_shutter
-.. _Bayer filter: http://en.wikipedia.org/wiki/Bayer_filter
+.. _rolling shutter: https://en.wikipedia.org/wiki/Rolling_shutter
+.. _Bayer filter: https://en.wikipedia.org/wiki/Bayer_filter
 .. _f-stop: https://en.wikipedia.org/wiki/F-number
 .. _luminance: https://en.wikipedia.org/wiki/Relative_luminance
-.. _YUV420: http://en.wikipedia.org/wiki/YUV#Y.27UV420p_.28and_Y.27V12_or_YV12.29_to_RGB888_conversion
-.. _RGB: http://en.wikipedia.org/wiki/RGB
+.. _YUV420: https://en.wikipedia.org/wiki/YUV#Y.E2.80.B2UV420p_.28and_Y.E2.80.B2V12_or_YV12.29_to_RGB888_conversion
+.. _RGB: https://en.wikipedia.org/wiki/RGB
 .. _discrete cosine transforms: https://en.wikipedia.org/wiki/Discrete_cosine_transform
 .. _motion estimation: https://en.wikipedia.org/wiki/Motion_estimation
 .. _color balance: https://en.wikipedia.org/wiki/Color_balance
@@ -955,3 +993,5 @@ abstraction layers which necessarily obscure (but hopefully simplify) the
 .. _DSLRs: https://en.wikipedia.org/wiki/Digital_single-lens_reflex_camera
 .. _gain: https://en.wikipedia.org/wiki/Gain_(electronics)
 .. _electromagnetic spectrum: https://en.wikipedia.org/wiki/Electromagnetic_spectrum
+.. _DMA: https://en.wikipedia.org/wiki/Direct_memory_access
+.. _ISO film speed: https://en.wikipedia.org/wiki/Film_speed#Current_system:_ISO
