@@ -49,6 +49,8 @@ from threading import Thread, Event
 from collections import namedtuple
 from fractions import Fraction
 from itertools import cycle
+from functools import reduce
+from operator import mul
 
 from . import bcm_host, mmal
 from .streams import BufferIO
@@ -142,7 +144,7 @@ PARAM_TYPES = {
     mmal.MMAL_PARAMETER_MB_ROWS_PER_SLICE:              mmal.MMAL_PARAMETER_UINT32_T,
     mmal.MMAL_PARAMETER_MEM_USAGE:                      mmal.MMAL_PARAMETER_MEM_USAGE_T,
     mmal.MMAL_PARAMETER_MINIMISE_FRAGMENTATION:         mmal.MMAL_PARAMETER_BOOLEAN_T,
-    mmal.MMAL_PARAMETER_MIRROR:                         mmal.MMAL_PARAMETER_MIRROR_T,
+    mmal.MMAL_PARAMETER_MIRROR:                         mmal.MMAL_PARAMETER_UINT32_T, # actually mmal.MMAL_PARAMETER_MIRROR_T but this just contains a uint32
     mmal.MMAL_PARAMETER_NALUNITFORMAT:                  mmal.MMAL_PARAMETER_VIDEO_NALUNITFORMAT_T,
     mmal.MMAL_PARAMETER_NO_IMAGE_PADDING:               mmal.MMAL_PARAMETER_BOOLEAN_T,
     mmal.MMAL_PARAMETER_POWERMON_ENABLE:                mmal.MMAL_PARAMETER_BOOLEAN_T,
@@ -288,6 +290,37 @@ class PiResolution(namedtuple('PiResolution', ('width', 'height'))):
         return '%dx%d' % (self.width, self.height)
 
 
+class PiFramerateRange(namedtuple('PiFramerateRange', ('low', 'high'))):
+    """
+    This class is a :func:`~collections.namedtuple` derivative used to store
+    the low and high limits of a range of framerates. It is recommended that
+    you access the information stored by this class by attribute rather than
+    position (for example: ``camera.framerate_range.low`` rather than
+    ``camera.framerate_range[0]``).
+
+    .. attribute:: low
+
+        The lowest framerate that the camera is permitted to use (inclusive).
+        When the :attr:`~picamera.PiCamera.framerate_range` attribute is
+        queried, this value will always be returned as a
+        :class:`~fractions.Fraction`.
+
+    .. attribute:: high
+
+        The highest framerate that the camera is permitted to use (inclusive).
+        When the :attr:`~picamera.PiCamera.framerate_range` attribute is
+        queried, this value will always be returned as a
+        :class:`~fractions.Fraction`.
+
+    .. versionadded:: 1.13
+    """
+
+    __slots__ = () # workaround python issue #24931
+
+    def __str__(self):
+        return '%s..%s' % (self.low, self.high)
+
+
 def open_stream(stream, output=True, buffering=65536):
     """
     This is the core of picamera's IO-semantics. It returns a tuple of a
@@ -415,10 +448,22 @@ def to_fraction(value, den_limit=65536):
 
 def to_rational(value):
     """
-    Converts *value* to an MMAL_RATIONAL_T.
+    Converts *value* (which can be anything accepted by :func:`to_fraction`) to
+    an MMAL_RATIONAL_T structure.
     """
     value = to_fraction(value)
     return mmal.MMAL_RATIONAL_T(value.numerator, value.denominator)
+
+
+def buffer_bytes(buf):
+    """
+    Given an object which implements the :ref:`buffer protocol
+    <bufferobjects>`, this function returns the size of the object in bytes.
+    The object can be multi-dimensional or include items larger than byte-size.
+    """
+    if not isinstance(buf, memoryview):
+        m = memoryview(buf)
+    return m.itemsize * reduce(mul, m.shape)
 
 
 def debug_pipeline(port):
@@ -1112,6 +1157,7 @@ class MMALPort(MMALControlPort):
             else:
                 if modified_buf is None:
                     buf.release()
+                    return
                 else:
                     buf = modified_buf
         try:
@@ -1177,14 +1223,11 @@ class MMALPort(MMALControlPort):
                     self._stopped = True
             finally:
                 buf.release()
-                while not self._stopped:
-                    try:
-                        self._pool.send_buffer(timeout=0.01)
-                    except PiCameraMMALError as e:
-                        if e.status != mmal.MMAL_EAGAIN:
-                            raise
-                    else:
-                        break
+                try:
+                    self._pool.send_buffer(block=False)
+                except PiCameraPortDisabled:
+                    # The port was disabled, no point trying again
+                    pass
 
         # Workaround: There is a bug in the MJPEG encoder that causes a
         # deadlock if the FIFO is full on shutdown. Increasing the encoder
@@ -1562,20 +1605,21 @@ class MMALBuffer(object):
                 ct.byref(buf, self._buf[0].offset),
                 self._buf[0].length)
     def _set_data(self, value):
-        if isinstance(value, memoryview) and (value.ndim > 1 or value.itemsize > 1):
-            value = value.cast('B')
-        data_len = len(value)
-        if data_len:
-            assert data_len <= self.size
-            bp = ct.c_uint8 * data_len
+        value_len = buffer_bytes(value)
+        if value_len:
+            if value_len > self.size:
+                raise PiCameraValueError(
+                    'data is too large for buffer (%d > %d)' % (
+                        value_len, self.size))
+            bp = ct.c_uint8 * value_len
             try:
                 sp = bp.from_buffer(value)
             except TypeError:
                 sp = bp.from_buffer_copy(value)
             with self as buf:
-                ct.memmove(buf, sp, data_len)
+                ct.memmove(buf, sp, value_len)
         self._buf[0].offset = 0
-        self._buf[0].length = data_len
+        self._buf[0].length = value_len
     data = property(_get_data, _set_data, doc="""\
         The data held in the buffer as a :class:`bytes` string. You can set
         this attribute to modify the data in the buffer. Acceptable values

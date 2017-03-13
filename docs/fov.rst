@@ -283,7 +283,7 @@ is largely determined by how slow the sensor can be made to read lines (at the
 hardware level this is down to the size of registers for holding things like
 line read-out times).
 
-This can be expression in the word equation:
+This can be expressed in the word equation:
 :math:`\frac{1\text{s}}{\text{min framerate in fps}} = \text{max exposure time
 in s}`
 
@@ -331,7 +331,7 @@ of the minimum line read-out time).
 
     Camera sensors also tend to have a border of non-sensing pixels (elements
     that are covered from light). These are used to determine what level of
-    charge represents "optically black". 
+    charge represents "optically black".
 
     The camera's elements are affected by heat (thermal radiation, after all,
     is just part of the `electromagnetic spectrum`_ close to the visible
@@ -493,7 +493,7 @@ recorded. The components that data passes through are as follows:
     - **Lens shading**: The camera firmware includes a table that corrects for
       chromatic distortion from the standard module's lens. This is one reason
       why third party modules incorporating different lenses may show
-      non-uniform color across a frame (across an image?).
+      non-uniform color across a frame.
 
     - **White balance**: The red and blue gains are applied to correct the
       `color balance`_. See :attr:`~PiCamera.awb_gains` and
@@ -521,7 +521,9 @@ recorded. The components that data passes through are as follows:
       are implemented.
 
     - **Distortion**: The distortion introduced by the camera's lens is
-      corrected.
+      corrected. At present this stage does nothing as the stock lens isn't a
+      `fish-eye lens`_; it exists as an option should a future sensor require
+      it.
 
     - **Resizing**: At this point, the frame is resized to the requested output
       resolution (all prior stages have been performed on "full" frame data
@@ -568,9 +570,11 @@ in the ISP). It tweaks the analog and digital gains, and the exposure time
 (`luminance`_) value.
 
 Likewise, when :attr:`~PiCamera.awb_mode` is not ``'off'``, automatic white
-balance (AWB) gathers statistics from each frame (again, prior to de-mosaic).
-It adjusts the red and blue gains (:attr:`~PiCamera.awb_gains`) attempting to
-nudge subsequent frames towards the expected `color balance`_.
+balance (AWB) gathers statistics from frames (again, prior to de-mosaic).
+Typically AWB analysis only occurs on 1 out of every 3 streamed frames as it is
+computationally expensive. It adjusts the red and blue gains
+(:attr:`~PiCamera.awb_gains`) attempting to nudge subsequent frames towards the
+expected `color balance`_.
 
 You can observe the effect of the AGC loop quite easily during daylight.
 Ensure the camera module is pointed at something bright like the sky or the
@@ -692,6 +696,14 @@ On the V2 module, these are:
     output directly to the GPU. The GPU's ISP block will resize to any
     requested resolution (within reason). Read on for details of mode
     selection.
+
+.. note::
+
+    Sensor mode 3 on the V2 module appears to be a duplicate, but this is
+    deliberate. The sensor modes of the V2 module were designed to mimic the
+    closest equivalent sensor modes of the V1 module. Long exposures on the
+    V1 module required a separate sensor mode; this wasn't required on the V2
+    module leading to the duplication of mode 2.
 
 Modes with full `field of view`_ (FoV) capture from the whole area of the
 camera's sensor (2592x1944 pixels for the V1 camera, 3280x2464 for the V2
@@ -1004,3 +1016,4 @@ abstraction layers which necessarily obscure (but hopefully simplify) the
 .. _electromagnetic spectrum: https://en.wikipedia.org/wiki/Electromagnetic_spectrum
 .. _DMA: https://en.wikipedia.org/wiki/Direct_memory_access
 .. _ISO film speed: https://en.wikipedia.org/wiki/Film_speed#Current_system:_ISO
+.. _fish-eye lens: https://en.wikipedia.org/wiki/Fisheye_lens

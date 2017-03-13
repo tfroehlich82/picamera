@@ -57,11 +57,9 @@ from .exc import (
     PiCameraMMALError,
     PiCameraDeprecated,
     PiCameraFallback,
-    mmal_check,
     )
 from .encoders import (
     PiVideoFrame,
-    PiVideoFrameType,
     PiVideoEncoder,
     PiRawVideoEncoder,
     PiCookedVideoEncoder,
@@ -92,31 +90,6 @@ def docstring_values(values, indent=8):
         "* ``'%s'``" % k
         for (k, v) in
         sorted(values.items(), key=itemgetter(1)))
-
-
-class PiCameraFramerateRange(namedtuple('PiCameraFramerateRange', ('low', 'high'))):
-    """
-    This class is a :func:`~collections.namedtuple` derivative used to store
-    the low and high limits of a range of framerates. It is recommended that
-    you access the information stored by this class by attribute rather than
-    position (for example: ``camera.framerate_range.low`` rather than
-    ``camera.framerate_range[0]``).
-
-    .. attribute:: low
-
-        The lowest framerate that the camera is permitted to use (inclusive).
-        When the :attr:`~PiCamera.framerate_range` attribute is queried, this
-        value will always be returned as a :class:`~fractions.Fraction`.
-
-    .. attribute:: high
-
-        The highest framerate that the camera is permitted to use (inclusive).
-        When the :attr:`~PiCamera.framerate_range` attribute is queried, this
-        value will always be returned as a :class:`~fractions.Fraction`.
-
-    .. versionadded:: 1.13
-    """
-    __slots__ = ()
 
 
 class PiCameraMaxResolution(object):
@@ -842,7 +815,7 @@ class PiCamera(object):
         self._preview = PiNullSink(
             self, self._camera.outputs[self.CAMERA_PREVIEW_PORT])
 
-    def add_overlay(self, source, size=None, **options):
+    def add_overlay(self, source, size=None, format=None, **options):
         """
         Adds a static overlay to the preview output.
 
@@ -852,23 +825,28 @@ class PiCamera(object):
         overlays can exist; each call to :meth:`add_overlay` returns a new
         :class:`PiOverlayRenderer` instance representing the overlay.
 
+        The *source* must be an object that supports the :ref:`buffer protocol
+        <bufferobjects>` in one of the supported unencoded formats: ``'yuv'``,
+        ``'rgb'``, ``'rgba'``, ``'bgr'``, or ``'bgra'``. The format can
+        specified explicitly with the optional *format* parameter. If not
+        specified, the method will attempt to guess the format based on the
+        length of *source* and the *size* (assuming 3 bytes per pixel for RGB,
+        and 4 bytes for RGBA).
+
         The optional *size* parameter specifies the size of the source image as
         a ``(width, height)`` tuple. If this is omitted or ``None`` then the
         size is assumed to be the same as the camera's current
         :attr:`resolution`.
 
-        The *source* must be an object that supports the :ref:`buffer protocol
-        <bufferobjects>` which has the same length as an image in `RGB`_ format
-        (colors represented as interleaved unsigned bytes) with the specified
-        *size* after the width has been rounded up to the nearest multiple of
-        32, and the height has been rounded up to the nearest multiple of 16.
-
-        For example, if *size* is ``(1280, 720)``, then *source* must be a
-        buffer with length 1280 × 720 × 3 bytes, or 2,764,800 bytes (because
-        1280 is a multiple of 32, and 720 is a multiple of 16 no extra rounding
-        is required).  However, if *size* is ``(97, 57)``, then *source* must
-        be a buffer with length 128 × 64 × 3 bytes, or 24,576 bytes (pixels
-        beyond column 97 and row 57 in the source will be ignored).
+        The length of *source* must take into account that widths are rounded
+        up to the nearest multiple of 32, and heights to the nearest multiple
+        of 16.  For example, if *size* is ``(1280, 720)``, and *format* is
+        ``'rgb'``, then *source* must be a buffer with length 1280 × 720 × 3
+        bytes, or 2,764,800 bytes (because 1280 is a multiple of 32, and 720 is
+        a multiple of 16 no extra rounding is required).  However, if *size* is
+        ``(97, 57)``, and *format* is ``'rgb'`` then *source* must be a buffer
+        with length 128 × 64 × 3 bytes, or 24,576 bytes (pixels beyond column
+        97 and row 57 in the source will be ignored).
 
         New overlays default to *layer* 0, whilst the preview defaults to layer
         2. Higher numbered layers obscure lower numbered layers, hence new
@@ -903,11 +881,15 @@ class PiCamera(object):
             and may reduce the update rate.
 
         .. _RGB: https://en.wikipedia.org/wiki/RGB
+        .. _RGBA: https://en.wikipedia.org/wiki/RGBA_color_space
 
         .. versionadded:: 1.8
+
+        .. versionchanged:: 1.13
+            Added *format* parameter
         """
         self._check_camera_open()
-        renderer = PiOverlayRenderer(self, source, size, **options)
+        renderer = PiOverlayRenderer(self, source, size, format, **options)
         self._overlays.append(renderer)
         return renderer
 
@@ -2352,7 +2334,7 @@ class PiCamera(object):
             self.CAMERA_PREVIEW_PORT
             )
         mp = self._camera.outputs[port_num].params[mmal.MMAL_PARAMETER_FPS_RANGE]
-        return PiCameraFramerateRange(
+        return mo.PiFramerateRange(
             mo.to_fraction(mp.fps_low), mo.to_fraction(mp.fps_high))
     def _set_framerate_range(self, value):
         self._check_camera_open()
@@ -2517,6 +2499,13 @@ class PiCamera(object):
         (automatic gain control) has to converge. The downside is that
         processing time for captures increases and that white balance and gain
         won't necessarily match the preview.
+
+        .. warning::
+
+            Enabling the still statistics pass will `override fixed white
+            balance`_ gains (set via :attr:`awb_gains` and :attr:`awb_mode`).
+
+        .. _override fixed white balance: https://www.raspberrypi.org/forums/viewtopic.php?p=875772&sid=92fa4ea70d1fe24590a4cdfb4a10c489#p875772
 
         .. versionadded:: 1.9
         """)
@@ -2748,7 +2737,13 @@ class PiCamera(object):
         The default value is ``'off'``. All possible values for the attribute
         can be obtained from the ``PiCamera.DRC_STRENGTHS`` attribute.
 
+        .. warning::
+
+            Enabling DRC will `override fixed white balance`_ gains (set via
+            :attr:`awb_gains` and :attr:`awb_mode`).
+
         .. _dynamic range compression: https://en.wikipedia.org/wiki/Gain_compression
+        .. _override fixed white balance: https://www.raspberrypi.org/forums/viewtopic.php?p=875772&sid=92fa4ea70d1fe24590a4cdfb4a10c489#p875772
 
         .. versionadded:: 1.6
         """.format(values=docstring_values(DRC_STRENGTHS)))
@@ -3036,7 +3031,9 @@ class PiCamera(object):
 
             AWB mode ``'off'`` is special: this disables the camera's automatic
             white balance permitting manual control of the white balance via
-            the :attr:`awb_gains` property.
+            the :attr:`awb_gains` property. However, even with AWB disabled,
+            some attributes (specifically :attr:`still_stats` and
+            :attr:`drc_strength`) can cause AWB re-calculations.
         """.format(values=docstring_values(AWB_MODES)))
 
     def _get_awb_gains(self):
@@ -3085,7 +3082,9 @@ class PiCamera(object):
         .. note::
 
             This attribute only has an effect when :attr:`awb_mode` is set to
-            ``'off'``.
+            ``'off'``. Also note that even with AWB disabled, some attributes
+            (specifically :attr:`still_stats` and :attr:`drc_strength`) can
+            cause AWB re-calculations.
 
         .. versionchanged:: 1.6
             Prior to version 1.6, this attribute was write-only.
@@ -3341,24 +3340,18 @@ class PiCamera(object):
 
     def _get_vflip(self):
         self._check_camera_open()
-        mp = self._camera.outputs[0].params[mmal.MMAL_PARAMETER_MIRROR]
-        return mp.value in (mmal.MMAL_PARAM_MIRROR_VERTICAL, mmal.MMAL_PARAM_MIRROR_BOTH)
+        return self._camera.outputs[0].params[mmal.MMAL_PARAMETER_MIRROR] in (
+            mmal.MMAL_PARAM_MIRROR_VERTICAL, mmal.MMAL_PARAM_MIRROR_BOTH)
     def _set_vflip(self, value):
         self._check_camera_open()
-        mp = mmal.MMAL_PARAMETER_MIRROR_T(
-            mmal.MMAL_PARAMETER_HEADER_T(
-                mmal.MMAL_PARAMETER_MIRROR,
-                ct.sizeof(mmal.MMAL_PARAMETER_MIRROR_T)
-                ),
-            {
-                (False, False): mmal.MMAL_PARAM_MIRROR_NONE,
-                (True,  False): mmal.MMAL_PARAM_MIRROR_VERTICAL,
-                (False, True):  mmal.MMAL_PARAM_MIRROR_HORIZONTAL,
-                (True,  True):  mmal.MMAL_PARAM_MIRROR_BOTH,
-                }[(bool(value), self.hflip)]
-            )
+        value = {
+            (False, False): mmal.MMAL_PARAM_MIRROR_NONE,
+            (True,  False): mmal.MMAL_PARAM_MIRROR_VERTICAL,
+            (False, True):  mmal.MMAL_PARAM_MIRROR_HORIZONTAL,
+            (True,  True):  mmal.MMAL_PARAM_MIRROR_BOTH,
+            }[(bool(value), self.hflip)]
         for port in self._camera.outputs:
-            port.params[mmal.MMAL_PARAMETER_MIRROR] = mp
+            port.params[mmal.MMAL_PARAMETER_MIRROR] = value
     vflip = property(_get_vflip, _set_vflip, doc="""\
         Retrieves or sets whether the camera's output is vertically flipped.
 
@@ -3370,24 +3363,18 @@ class PiCamera(object):
 
     def _get_hflip(self):
         self._check_camera_open()
-        mp = self._camera.outputs[0].params[mmal.MMAL_PARAMETER_MIRROR]
-        return mp.value in (mmal.MMAL_PARAM_MIRROR_HORIZONTAL, mmal.MMAL_PARAM_MIRROR_BOTH)
+        return self._camera.outputs[0].params[mmal.MMAL_PARAMETER_MIRROR] in (
+            mmal.MMAL_PARAM_MIRROR_HORIZONTAL, mmal.MMAL_PARAM_MIRROR_BOTH)
     def _set_hflip(self, value):
         self._check_camera_open()
-        mp = mmal.MMAL_PARAMETER_MIRROR_T(
-            mmal.MMAL_PARAMETER_HEADER_T(
-                mmal.MMAL_PARAMETER_MIRROR,
-                ct.sizeof(mmal.MMAL_PARAMETER_MIRROR_T)
-                ),
-            {
-                (False, False): mmal.MMAL_PARAM_MIRROR_NONE,
-                (True,  False): mmal.MMAL_PARAM_MIRROR_VERTICAL,
-                (False, True):  mmal.MMAL_PARAM_MIRROR_HORIZONTAL,
-                (True,  True):  mmal.MMAL_PARAM_MIRROR_BOTH,
-                }[(self.vflip, bool(value))]
-            )
+        value = {
+            (False, False): mmal.MMAL_PARAM_MIRROR_NONE,
+            (True,  False): mmal.MMAL_PARAM_MIRROR_VERTICAL,
+            (False, True):  mmal.MMAL_PARAM_MIRROR_HORIZONTAL,
+            (True,  True):  mmal.MMAL_PARAM_MIRROR_BOTH,
+            }[(self.vflip, bool(value))]
         for port in self._camera.outputs:
-            port.params[mmal.MMAL_PARAMETER_MIRROR] = mp
+            port.params[mmal.MMAL_PARAMETER_MIRROR] = value
     hflip = property(_get_hflip, _set_hflip, doc="""\
         Retrieves or sets whether the camera's output is horizontally flipped.
 

@@ -45,8 +45,6 @@ import ctypes as ct
 from . import bcm_host, mmal, mmalobj as mo
 from .frames import PiVideoFrame, PiVideoFrameType
 from .exc import (
-    mmal_check,
-    PiCameraError,
     PiCameraMMALError,
     PiCameraValueError,
     PiCameraIOError,
@@ -188,10 +186,9 @@ class PiEncoder(object):
                 self._create_resizer(*mo.to_resolution(resize))
             self._create_encoder(format, **options)
             if self.encoder:
-                if self.resizer:
-                    self.encoder.inputs[0].connect(self.resizer.outputs[0]).enable()
-                else:
-                    self.encoder.inputs[0].connect(self.input_port).enable()
+                self.encoder.connection.enable()
+            if self.resizer:
+                self.resizer.connection.enable()
         except:
             self.close()
             raise
@@ -207,7 +204,7 @@ class PiEncoder(object):
         :attr:`resizer` attribute to the constructed resizer component.
         """
         self.resizer = mo.MMALResizer()
-        self.resizer.inputs[0].connect(self.input_port).enable()
+        self.resizer.inputs[0].connect(self.input_port)
         self.resizer.outputs[0].copy_from(self.resizer.inputs[0])
         self.resizer.outputs[0].format = mmal.MMAL_ENCODING_I420
         self.resizer.outputs[0].framesize = (width, height)
@@ -236,9 +233,9 @@ class PiEncoder(object):
         self.encoder = self.encoder_type()
         self.output_port = self.encoder.outputs[0]
         if self.resizer:
-            self.encoder.inputs[0].copy_from(self.resizer.outputs[0])
+            self.encoder.inputs[0].connect(self.resizer.outputs[0])
         else:
-            self.encoder.inputs[0].copy_from(self.input_port)
+            self.encoder.inputs[0].connect(self.input_port)
         self.encoder.outputs[0].copy_from(self.encoder.inputs[0])
         # NOTE: We deliberately don't commit the output port format here as
         # this is a base class and the output configuration is incomplete at
@@ -565,7 +562,10 @@ class PiRawMixin(PiEncoder):
             self.output_port = self.resizer.outputs[0]
         else:
             self.output_port = self.input_port
-        self.output_port.format = self.RAW_ENCODINGS[format][0]
+        try:
+            self.output_port.format = self.RAW_ENCODINGS[format][0]
+        except KeyError:
+            raise PiCameraValueError('unknown format %s' % format)
         self.output_port.commit()
 
     def _callback_write(self, buf, key=PiVideoFrameType.frame):
