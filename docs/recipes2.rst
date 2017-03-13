@@ -410,10 +410,10 @@ long (before exhausting the disk cache).
 If you are intending to perform processing on the frames after capture, you may
 be better off just capturing video and decoding frames from the resulting file
 rather than dealing with individual JPEG captures. Thankfully this is
-relatively easy as the JPEG format has a well designed `magic number`_ (``FF
-D8``) which cannot appear anywhere else in the JPEG data. This means we can use
-a :ref:`custom output <custom_outputs>` to separate the frames out of an MJPEG
-video recording by inspecting the first two bytes of each buffer:
+relatively easy as the JPEG format has a simple `magic number`_ (``FF D8``).
+This means we can use a :ref:`custom output <custom_outputs>` to separate the
+frames out of an MJPEG video recording by inspecting the first two bytes of
+each buffer:
 
 .. literalinclude:: examples/rapid_capture_mjpeg.py
 
@@ -432,7 +432,7 @@ Unencoded video capture
 =======================
 
 Just as unencoded RGB data can be captured as images, the Pi's camera module
-can also an unencoded stream of RGB (or YUV) video data. Combining this with
+can also capture an unencoded stream of RGB (or YUV) video data. Combining this with
 the methods presented in :ref:`custom_outputs` (via the classes from
 :mod:`picamera.array`), we can produce a fairly rapid color detection script:
 
@@ -676,8 +676,10 @@ classes implement base functionality but aren't technically "abstract"):
 The following table details which :class:`PiCamera` methods use which encoder
 classes, and which method they call to construct these encoders:
 
+.. tabularcolumns:: |p{52mm}|p{42mm}|p{53mm}|
+
 +--------------------------------------+---------------------------------------+------------------------------------+
-| Method(s)                            | Call                                  | Returns                            |
+| Method(s)                            | Calls                                 | Returns                            |
 +======================================+=======================================+====================================+
 | :meth:`~PiCamera.capture`            | :meth:`~PiCamera._get_image_encoder`  | :class:`PiCookedOneImageEncoder`   |
 | :meth:`~PiCamera.capture_continuous` |                                       | :class:`PiRawOneImageEncoder`      |
@@ -816,9 +818,8 @@ for the revision number if you are unsure):
 +================================+============================+
 | Raspberry Pi Model B rev 1     | ``/videocore/pins_rev1``   |
 +--------------------------------+----------------------------+
-| Raspberry Pi Model A           | ``/videocore/pins_rev2``   |
-|                                |                            |
-| Raspberry Pi Model B rev 2     |                            |
+| Raspberry Pi Model A and       | ``/videocore/pins_rev2``   |
+| Model B rev 2                  |                            |
 +--------------------------------+----------------------------+
 | Raspberry Pi Model A+          | ``/videocore/pins_aplus``  |
 +--------------------------------+----------------------------+
@@ -829,16 +830,14 @@ for the revision number if you are unsure):
 | Raspberry Pi 2 Model B rev 1.0 | ``/videocore/pins_2b1``    |
 +--------------------------------+----------------------------+
 | Raspberry Pi 2 Model B rev 1.1 | ``/videocore/pins_2b2``    |
-|                                |                            |
-| Raspberry Pi 2 Model B rev 1.2 |                            |
+| and rev 1.2                    |                            |
 +--------------------------------+----------------------------+
 | Raspberry Pi 3 Model B rev 1.0 | ``/videocore/pins_3b1``    |
 +--------------------------------+----------------------------+
 | Raspberry Pi 3 Model B rev 1.2 | ``/videocore/pins_3b2``    |
 +--------------------------------+----------------------------+
-| Raspberry Pi Zero rev 1.2      | ``/videocore/pins_pi0``    |
-|                                |                            |
-| Raspberry Pi Zero rev 1.3      |                            |
+| Raspberry Pi Zero rev 1.2 and  | ``/videocore/pins_pi0``    |
+| rev 1.3                        |                            |
 +--------------------------------+----------------------------+
 
 Under the section for your particular model of Pi you will find ``pin_config``
@@ -864,7 +863,7 @@ the flash pin as GPIO 17:
 
 .. code-block:: text
 
-    pin-define@FLASH_0_ENABLE {
+    pin_define@FLASH_0_ENABLE {
         type = "internal";
         number = <17>;
     };
@@ -874,7 +873,7 @@ blob for the firmware to read. This is done with the following command line:
 
 .. code-block:: console
 
-    $ dtc -I dts -O dtb dt-blob.dts -o dt-blob.bin
+    $ dtc -q -I dts -O dtb dt-blob.dts -o dt-blob.bin
 
 Dissecting this command line, the following components are present:
 
@@ -888,16 +887,12 @@ Dissecting this command line, the following components are present:
 
 * ``-o dt-blob.bin`` - The output filename
 
-This should output the following:
-
-.. code-block:: text
-
-    DTC: dts->dtb  on file "dt-blob.dts"
-
-If anything else is output, it will most likely be an error message indicating
-you have made a mistake in the device tree source. In this case, review your
-edits carefully (note that sections and properties *must* be semi-colon
-terminated for example), and try again.
+This should output nothing. If you get lots of warnings, you've forgotten the
+``-q`` switch; you can ignore the warnings. If anything else is output, it will
+most likely be an error message indicating you have made a mistake in the
+device tree source. In this case, review your edits carefully (note that
+sections and properties *must* be semi-colon terminated for example), and try
+again.
 
 Now the device tree binary blob has been produced, it needs to be placed on the
 first partition of the SD card. In the case of non-NOOBS Raspbian installs,
@@ -982,24 +977,24 @@ acts as a flash LED with the Python script above.
 .. versionadded:: 1.10
 
 
-.. _YUV: http://en.wikipedia.org/wiki/YUV
+.. _YUV: https://en.wikipedia.org/wiki/YUV
 .. _YUV420: https://en.wikipedia.org/wiki/YUV#Y.E2.80.B2UV420p_.28and_Y.E2.80.B2V12_or_YV12.29_to_RGB888_conversion
-.. _RGB: http://en.wikipedia.org/wiki/RGB
-.. _RGBA: http://en.wikipedia.org/wiki/RGBA_color_space
+.. _RGB: https://en.wikipedia.org/wiki/RGB
+.. _RGBA: https://en.wikipedia.org/wiki/RGBA_color_space
 .. _numpy: http://www.numpy.org/
-.. _ring buffer: http://en.wikipedia.org/wiki/Circular_buffer
+.. _ring buffer: https://en.wikipedia.org/wiki/Circular_buffer
 .. _OV5647: http://www.ovt.com/products/sensor.php?id=66
 .. _IMX219: http://www.sony.net/Products/SC-HP/new_pro/april_2014/imx219_e.html
-.. _Bayer CFA: http://en.wikipedia.org/wiki/Bayer_filter
-.. _de-mosaicing: http://en.wikipedia.org/wiki/Demosaicing
-.. _color balance: http://en.wikipedia.org/wiki/Color_balance
-.. _macro-block: http://en.wikipedia.org/wiki/Macroblock
-.. _magnitude of the vector: http://en.wikipedia.org/wiki/Magnitude_%28mathematics%29#Euclidean_vectors
-.. _Sum of Absolute Differences: http://en.wikipedia.org/wiki/Sum_of_absolute_differences
-.. _rolling shutter: http://en.wikipedia.org/wiki/Rolling_shutter
-.. _VideoCore device tree blob: http://www.raspberrypi.org/documentation/configuration/pin-configuration.md
-.. _flash metering: http://en.wikipedia.org/wiki/Through-the-lens_metering#Through_the_lens_flash_metering
-.. _Broadcom pin numbers: http://raspberrypi.stackexchange.com/questions/12966/what-is-the-difference-between-board-and-bcm-for-gpio-pin-numbering
+.. _Bayer CFA: https://en.wikipedia.org/wiki/Bayer_filter
+.. _de-mosaicing: https://en.wikipedia.org/wiki/Demosaicing
+.. _color balance: https://en.wikipedia.org/wiki/Color_balance
+.. _macro-block: https://en.wikipedia.org/wiki/Macroblock
+.. _magnitude of the vector: https://en.wikipedia.org/wiki/Magnitude_%28mathematics%29#Euclidean_vector_space
+.. _Sum of Absolute Differences: https://en.wikipedia.org/wiki/Sum_of_absolute_differences
+.. _rolling shutter: https://en.wikipedia.org/wiki/Rolling_shutter
+.. _VideoCore device tree blob: https://www.raspberrypi.org/documentation/configuration/pin-configuration.md
+.. _flash metering: https://en.wikipedia.org/wiki/Through-the-lens_metering#Through_the_lens_flash_metering
+.. _Broadcom pin numbers: https://raspberrypi.stackexchange.com/questions/12966/what-is-the-difference-between-board-and-bcm-for-gpio-pin-numbering
 .. _OpenCV: http://opencv.org/
 .. _magic number: https://en.wikipedia.org/wiki/Magic_number_(programming)#Magic_numbers_in_files
 .. _pistreaming: https://github.com/waveform80/pistreaming/

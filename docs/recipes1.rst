@@ -181,6 +181,13 @@ most likely be completely white or at least heavily over-exposed.
     subjects may appear distorted if they move relative to the camera. This
     effect will be exaggerated by using longer exposure times.
 
+When using long exposures, it is often preferable to use
+:attr:`~PiCamera.framerate_range` instead of :attr:`~PiCamera.framerate`. This
+allows the camera to vary the framerate on the fly and use shorter framerates
+where possible (leading to shorter capture delays). This hasn't been used in
+the script above as the shutter speed is forced to 6 seconds (the maximum
+possible on the V1 camera module) which would make a framerate range pointless.
+
 
 .. _streaming_capture:
 
@@ -494,6 +501,12 @@ running as root with ``sudo python``), you can also control the LED via the
 
 .. literalinclude:: examples/led_control.py
 
+.. note::
+
+    The camera LED cannot currently be controlled when the module is attached
+    to a Raspberry Pi 3 Model B as the GPIO that controls the LED has moved to
+    a GPIO expander not directly accessible to the ARM processor.
+
 .. warning::
 
     Be aware when you first use the LED property it will set the GPIO library
@@ -504,8 +517,8 @@ running as root with ``sudo python``), you can also control the LED via the
 
 .. _PIL: http://effbot.org/imagingbook/pil-index.htm
 .. _RPi.GPIO: https://pypi.python.org/pypi/RPi.GPIO
-.. _ring buffer: http://en.wikipedia.org/wiki/Circular_buffer
-.. _boot configuration: http://www.raspberrypi.org/documentation/configuration/config-txt.md
-.. _Little Endian: http://en.wikipedia.org/wiki/Endianness
-.. _rolling shutter: http://en.wikipedia.org/wiki/Rolling_shutter
+.. _ring buffer: https://en.wikipedia.org/wiki/Circular_buffer
+.. _boot configuration: https://www.raspberrypi.org/documentation/configuration/config-txt.md
+.. _Little Endian: https://en.wikipedia.org/wiki/Endianness
+.. _rolling shutter: https://en.wikipedia.org/wiki/Rolling_shutter
 

@@ -93,14 +93,21 @@ def bytes_to_yuv(data, resolution):
             'Incorrect buffer length for resolution %dx%d' % (width, height))
     # Separate out the Y, U, and V values from the array
     a = np.frombuffer(data, dtype=np.uint8)
-    Y = a[:y_len]
-    U = a[y_len:-uv_len]
-    V = a[-uv_len:]
+    Y = a[:y_len].reshape((fheight, fwidth))
+    Uq = a[y_len:-uv_len].reshape((fheight // 2, fwidth // 2))
+    Vq = a[-uv_len:].reshape((fheight // 2, fwidth // 2))
     # Reshape the values into two dimensions, and double the size of the
     # U and V values (which only have quarter resolution in YUV4:2:0)
-    Y = Y.reshape((fheight, fwidth))
-    U = U.reshape((fheight // 2, fwidth // 2)).repeat(2, axis=0).repeat(2, axis=1)
-    V = V.reshape((fheight // 2, fwidth // 2)).repeat(2, axis=0).repeat(2, axis=1)
+    U = np.empty_like(Y)
+    V = np.empty_like(Y)
+    U[0::2, 0::2] = Uq
+    U[0::2, 1::2] = Uq
+    U[1::2, 0::2] = Uq
+    U[1::2, 1::2] = Uq
+    V[0::2, 0::2] = Vq
+    V[0::2, 1::2] = Vq
+    V[1::2, 0::2] = Vq
+    V[1::2, 1::2] = Vq
     # Stack the channels together and crop to the actual resolution
     return np.dstack((Y, U, V))[:height, :width]
 
@@ -277,7 +284,7 @@ class PiYUVArray(PiArrayOutput):
                 print('Captured %dx%d image' % (
                         output.array.shape[1], output.array.shape[0]))
 
-    .. _ITU-R BT.601: http://en.wikipedia.org/wiki/YCbCr#ITU-R_BT.601_conversion
+    .. _ITU-R BT.601: https://en.wikipedia.org/wiki/YCbCr#ITU-R_BT.601_conversion
     """
 
     def __init__(self, camera, size=None):
@@ -385,8 +392,8 @@ class PiBayerArray(PiArrayOutput):
         This class now supports the V2 module properly, and handles flipped
         images, and forced sensor modes correctly.
 
-    .. _de-mosaicing: http://en.wikipedia.org/wiki/Demosaicing
-    .. _Bayer pattern: http://en.wikipedia.org/wiki/Bayer_filter
+    .. _de-mosaicing: https://en.wikipedia.org/wiki/Demosaicing
+    .. _Bayer pattern: https://en.wikipedia.org/wiki/Bayer_filter
     """
     BAYER_OFFSETS = {
         0: ((0, 0), (1, 0), (0, 1), (1, 1)),
@@ -484,7 +491,7 @@ class PiBayerArray(PiArrayOutput):
         dimensional, with the last dimension being the color planes (see
         *output_dims* parameter on the constructor).
 
-        .. _de-mosaic: http://en.wikipedia.org/wiki/Demosaicing
+        .. _de-mosaic: https://en.wikipedia.org/wiki/Demosaicing
         """
         if self._demo is None:
             # Construct 3D representation of Bayer data (if necessary)
@@ -600,8 +607,8 @@ class PiMotionArray(PiArrayOutput):
         This class is not suitable for real-time analysis of motion vector
         data. See the :class:`PiMotionAnalysis` class instead.
 
-    .. _macro-blocks: http://en.wikipedia.org/wiki/Macroblock
-    .. _sum of absolute differences: http://en.wikipedia.org/wiki/Sum_of_absolute_differences
+    .. _macro-blocks: https://en.wikipedia.org/wiki/Macroblock
+    .. _sum of absolute differences: https://en.wikipedia.org/wiki/Sum_of_absolute_differences
     """
 
     def flush(self):

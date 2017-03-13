@@ -49,6 +49,8 @@ from threading import Thread, Event
 from collections import namedtuple
 from fractions import Fraction
 from itertools import cycle
+from functools import reduce
+from operator import mul
 
 from . import bcm_host, mmal
 from .streams import BufferIO
@@ -136,12 +138,13 @@ PARAM_TYPES = {
     mmal.MMAL_PARAMETER_ISO:                            mmal.MMAL_PARAMETER_UINT32_T,
     mmal.MMAL_PARAMETER_JPEG_ATTACH_LOG:                mmal.MMAL_PARAMETER_BOOLEAN_T,
     mmal.MMAL_PARAMETER_JPEG_Q_FACTOR:                  mmal.MMAL_PARAMETER_UINT32_T,
+    mmal.MMAL_PARAMETER_JPEG_RESTART_INTERVAL:          mmal.MMAL_PARAMETER_UINT32_T,
     mmal.MMAL_PARAMETER_LOCKSTEP_ENABLE:                mmal.MMAL_PARAMETER_BOOLEAN_T,
     mmal.MMAL_PARAMETER_LOGGING:                        mmal.MMAL_PARAMETER_LOGGING_T,
     mmal.MMAL_PARAMETER_MB_ROWS_PER_SLICE:              mmal.MMAL_PARAMETER_UINT32_T,
     mmal.MMAL_PARAMETER_MEM_USAGE:                      mmal.MMAL_PARAMETER_MEM_USAGE_T,
     mmal.MMAL_PARAMETER_MINIMISE_FRAGMENTATION:         mmal.MMAL_PARAMETER_BOOLEAN_T,
-    mmal.MMAL_PARAMETER_MIRROR:                         mmal.MMAL_PARAMETER_MIRROR_T,
+    mmal.MMAL_PARAMETER_MIRROR:                         mmal.MMAL_PARAMETER_UINT32_T, # actually mmal.MMAL_PARAMETER_MIRROR_T but this just contains a uint32
     mmal.MMAL_PARAMETER_NALUNITFORMAT:                  mmal.MMAL_PARAMETER_VIDEO_NALUNITFORMAT_T,
     mmal.MMAL_PARAMETER_NO_IMAGE_PADDING:               mmal.MMAL_PARAMETER_BOOLEAN_T,
     mmal.MMAL_PARAMETER_POWERMON_ENABLE:                mmal.MMAL_PARAMETER_BOOLEAN_T,
@@ -287,6 +290,37 @@ class PiResolution(namedtuple('PiResolution', ('width', 'height'))):
         return '%dx%d' % (self.width, self.height)
 
 
+class PiFramerateRange(namedtuple('PiFramerateRange', ('low', 'high'))):
+    """
+    This class is a :func:`~collections.namedtuple` derivative used to store
+    the low and high limits of a range of framerates. It is recommended that
+    you access the information stored by this class by attribute rather than
+    position (for example: ``camera.framerate_range.low`` rather than
+    ``camera.framerate_range[0]``).
+
+    .. attribute:: low
+
+        The lowest framerate that the camera is permitted to use (inclusive).
+        When the :attr:`~picamera.PiCamera.framerate_range` attribute is
+        queried, this value will always be returned as a
+        :class:`~fractions.Fraction`.
+
+    .. attribute:: high
+
+        The highest framerate that the camera is permitted to use (inclusive).
+        When the :attr:`~picamera.PiCamera.framerate_range` attribute is
+        queried, this value will always be returned as a
+        :class:`~fractions.Fraction`.
+
+    .. versionadded:: 1.13
+    """
+
+    __slots__ = () # workaround python issue #24931
+
+    def __str__(self):
+        return '%s..%s' % (self.low, self.high)
+
+
 def open_stream(stream, output=True, buffering=65536):
     """
     This is the core of picamera's IO-semantics. It returns a tuple of a
@@ -414,10 +448,22 @@ def to_fraction(value, den_limit=65536):
 
 def to_rational(value):
     """
-    Converts *value* to an MMAL_RATIONAL_T.
+    Converts *value* (which can be anything accepted by :func:`to_fraction`) to
+    an MMAL_RATIONAL_T structure.
     """
     value = to_fraction(value)
     return mmal.MMAL_RATIONAL_T(value.numerator, value.denominator)
+
+
+def buffer_bytes(buf):
+    """
+    Given an object which implements the :ref:`buffer protocol
+    <bufferobjects>`, this function returns the size of the object in bytes.
+    The object can be multi-dimensional or include items larger than byte-size.
+    """
+    if not isinstance(buf, memoryview):
+        m = memoryview(buf)
+    return m.itemsize * reduce(mul, m.shape)
 
 
 def debug_pipeline(port):
@@ -774,7 +820,17 @@ class MMALControlPort(MMALObject):
 
     @property
     def name(self):
-        return self._port[0].name.decode('ascii')
+        result = self._port[0].name.decode('ascii')
+        if result.endswith(')'):
+            try:
+                # strip (format) from port names as it doesn't really belong
+                # there (it doesn't identify the port in any way) and makes
+                # matching some of the correctional cases a pain
+                return result[:result.rindex('(')]
+            except ValueError:
+                return result
+        else:
+            return result
 
     @property
     def type(self):
@@ -822,6 +878,113 @@ class MMALPort(MMALControlPort):
     :class:`MMALAudioPort`, and :class:`MMALSubPicturePort`.
     """
     __slots__ = ('_opaque_subformat', '_pool', '_stopped', '_connection')
+
+    # A mapping of corrected definitions of supported_formats for ports with
+    # particular names. Older firmwares either raised EINVAL, ENOSYS, or just
+    # reported the wrong things for various ports; these lists are derived from
+    # querying newer firmwares or in some cases guessing sensible defaults
+    # (for ports where even the newer firmwares get stuff wrong).
+    _supported_formats_patch = {
+        'vc.ril.camera:out:2': [
+            mmal.MMAL_ENCODING_I420,
+            mmal.MMAL_ENCODING_NV12,
+            mmal.MMAL_ENCODING_I422,
+            mmal.MMAL_ENCODING_YUYV,
+            mmal.MMAL_ENCODING_YVYU,
+            mmal.MMAL_ENCODING_VYUY,
+            mmal.MMAL_ENCODING_UYVY,
+            mmal.MMAL_ENCODING_BGR24,
+            mmal.MMAL_ENCODING_BGRA,
+            mmal.MMAL_ENCODING_RGB16,
+            mmal.MMAL_ENCODING_YV12,
+            mmal.MMAL_ENCODING_NV21,
+            mmal.MMAL_ENCODING_RGB24,
+            mmal.MMAL_ENCODING_RGBA,
+            ],
+        'vc.ril.image_encode:in:0': [
+            mmal.MMAL_ENCODING_RGB16,
+            mmal.MMAL_ENCODING_RGB24,
+            mmal.MMAL_ENCODING_RGBA,
+            mmal.MMAL_ENCODING_BGRA,
+            mmal.MMAL_ENCODING_I420,
+            mmal.MMAL_ENCODING_I422,
+            mmal.MMAL_ENCODING_NV12,
+            mmal.MMAL_ENCODING_YUYV,
+            mmal.MMAL_ENCODING_YVYU,
+            mmal.MMAL_ENCODING_VYUY,
+            ],
+        'vc.ril.image_encode:out:0': [
+            mmal.MMAL_ENCODING_JPEG,
+            mmal.MMAL_ENCODING_GIF,
+            mmal.MMAL_ENCODING_PNG,
+            mmal.MMAL_ENCODING_BMP,
+            mmal.MMAL_ENCODING_PPM,
+            mmal.MMAL_ENCODING_TGA,
+            ],
+        'vc.ril.resize:in:0': [
+            mmal.MMAL_ENCODING_RGBA,
+            mmal.MMAL_ENCODING_BGRA,
+            mmal.MMAL_ENCODING_RGB16,
+            mmal.MMAL_ENCODING_I420,
+            # several invalid encodings (lowercase versions of the priors)
+            # appear here in modern firmwares but since they don't map to any
+            # constants they're excluded
+            mmal.MMAL_ENCODING_I420_SLICE,
+            ],
+        'vc.ril.resize:out:0': [
+            mmal.MMAL_ENCODING_RGBA,
+            mmal.MMAL_ENCODING_BGRA,
+            mmal.MMAL_ENCODING_RGB16,
+            mmal.MMAL_ENCODING_I420,
+            # same invalid encodings as above here
+            mmal.MMAL_ENCODING_I420_SLICE,
+            ],
+        'vc.ril.isp:in:0': [
+            mmal.MMAL_ENCODING_BAYER_SBGGR8,
+            mmal.MMAL_ENCODING_BAYER_SBGGR10DPCM8,
+            mmal.MMAL_ENCODING_BAYER_SBGGR10P,
+            mmal.MMAL_ENCODING_BAYER_SBGGR12P,
+            mmal.MMAL_ENCODING_YUYV,
+            mmal.MMAL_ENCODING_YVYU,
+            mmal.MMAL_ENCODING_VYUY,
+            mmal.MMAL_ENCODING_UYVY,
+            mmal.MMAL_ENCODING_I420,
+            mmal.MMAL_ENCODING_YV12,
+            mmal.MMAL_ENCODING_I422,
+            mmal.MMAL_ENCODING_RGB24,
+            mmal.MMAL_ENCODING_BGR24,
+            mmal.MMAL_ENCODING_RGBA,
+            mmal.MMAL_ENCODING_BGRA,
+            mmal.MMAL_ENCODING_RGB16,
+            mmal.MMAL_ENCODING_YUVUV128,
+            mmal.MMAL_ENCODING_NV12,
+            mmal.MMAL_ENCODING_NV21,
+            ],
+        'vc.ril.isp:out:0': [
+            mmal.MMAL_ENCODING_YUYV,
+            mmal.MMAL_ENCODING_YVYU,
+            mmal.MMAL_ENCODING_VYUY,
+            mmal.MMAL_ENCODING_UYVY,
+            mmal.MMAL_ENCODING_I420,
+            mmal.MMAL_ENCODING_YV12,
+            mmal.MMAL_ENCODING_I422,
+            mmal.MMAL_ENCODING_RGB24,
+            mmal.MMAL_ENCODING_BGR24,
+            mmal.MMAL_ENCODING_RGBA,
+            mmal.MMAL_ENCODING_BGRA,
+            mmal.MMAL_ENCODING_RGB16,
+            mmal.MMAL_ENCODING_YUVUV128,
+            mmal.MMAL_ENCODING_NV12,
+            mmal.MMAL_ENCODING_NV21,
+            ],
+        'vc.null_sink:in:0': [
+            mmal.MMAL_ENCODING_I420,
+            mmal.MMAL_ENCODING_RGB24,
+            mmal.MMAL_ENCODING_BGR24,
+            mmal.MMAL_ENCODING_RGBA,
+            mmal.MMAL_ENCODING_BGRA,
+            ],
+        }
 
     def __init__(self, port, opaque_subformat='OPQV'):
         super(MMALPort, self).__init__(port)
@@ -892,33 +1055,33 @@ class MMALPort(MMALControlPort):
         try:
             mp = self.params[mmal.MMAL_PARAMETER_SUPPORTED_ENCODINGS]
         except PiCameraMMALError as e:
-            if e.status == mmal.MMAL_EINVAL and self.name == 'vc.ril.camera:out:2':
-                # Workaround: old firmwares raise EINVAL when camera's still
-                # port is queried for supported formats. The following is the
+            if e.status in (mmal.MMAL_EINVAL, mmal.MMAL_ENOSYS):
+                # Workaround: old firmwares raise EINVAL or ENOSYS when various
+                # ports are queried for supported formats. The following is the
                 # correct sequence for old firmwares (note: swapped RGB24 and
-                # BGR24 order)
-                return [
-                    mmal.MMAL_ENCODING_I420,
-                    mmal.MMAL_ENCODING_NV12,
-                    mmal.MMAL_ENCODING_I422,
-                    mmal.MMAL_ENCODING_YUYV,
-                    mmal.MMAL_ENCODING_YVYU,
-                    mmal.MMAL_ENCODING_VYUY,
-                    mmal.MMAL_ENCODING_UYVY,
-                    mmal.MMAL_ENCODING_BGR24,
-                    mmal.MMAL_ENCODING_BGRA,
-                    mmal.MMAL_ENCODING_RGB16,
-                    mmal.MMAL_ENCODING_YV12,
-                    mmal.MMAL_ENCODING_NV21,
-                    mmal.MMAL_ENCODING_RGB24,
-                    mmal.MMAL_ENCODING_RGBA,
-                    ]
+                # BGR24 order in still port) ... probably (vc.ril.camera:out:2
+                # is definitely right, the rest are largely guessed based on
+                # queries of later firmwares)
+                try:
+                    return MMALPort._supported_formats_patch[self.name]
+                except KeyError:
+                    raise e
             else:
                 raise
         else:
-            return [
+            result = [
                 v for v in mp.encoding if v != 0
                 ][:mp.hdr.size // ct.sizeof(ct.c_uint32)]
+            # Workaround: Fix incorrect result on MMALImageEncoder.outputs[0]
+            # from modern firmwares
+            if self.name == 'vc.ril.image_encode:out:0' and result == [
+                    mmal.MMAL_ENCODING_MP2V, mmal.MMAL_ENCODING_MP2V,
+                    mmal.MMAL_ENCODING_H264, mmal.MMAL_ENCODING_H264,
+                    mmal.MMAL_ENCODING_VP7, mmal.MMAL_ENCODING_VP7,
+                    mmal.MMAL_ENCODING_VP6, mmal.MMAL_ENCODING_VP6]:
+                return MMALPort._supported_formats_patch[self.name]
+            else:
+                return result
 
     def _get_bitrate(self):
         return self._port[0].format[0].bitrate
@@ -994,6 +1157,7 @@ class MMALPort(MMALControlPort):
             else:
                 if modified_buf is None:
                     buf.release()
+                    return
                 else:
                     buf = modified_buf
         try:
@@ -1059,14 +1223,11 @@ class MMALPort(MMALControlPort):
                     self._stopped = True
             finally:
                 buf.release()
-                while not self._stopped:
-                    try:
-                        self._pool.send_buffer(timeout=0.01)
-                    except PiCameraMMALError as e:
-                        if e.status != mmal.MMAL_EAGAIN:
-                            raise
-                    else:
-                        break
+                try:
+                    self._pool.send_buffer(block=False)
+                except PiCameraPortDisabled:
+                    # The port was disabled, no point trying again
+                    pass
 
         # Workaround: There is a bug in the MJPEG encoder that causes a
         # deadlock if the FIFO is full on shutdown. Increasing the encoder
@@ -1078,23 +1239,24 @@ class MMALPort(MMALControlPort):
             self._port[0].buffer_size = max(512 * 1024, self._port[0].buffer_size_recommended)
         if callback:
             assert self._stopped
-            self._stopped = False
-            self._wrapper = mmal.MMAL_PORT_BH_CB_T(wrapper)
-            mmal_check(
-                mmal.mmal_port_enable(self._port, self._wrapper),
-                prefix="Unable to enable port %s" % self.name)
             assert self._pool is None
+            self._stopped = False
             self._pool = MMALPortPool(self)
-            # If this port is an output port, send it all the buffers
-            # in the pool. If it's an input port, don't bother: the user
-            # will presumably want to feed buffers to it manually
-            if self._port[0].type == mmal.MMAL_PORT_TYPE_OUTPUT:
-                try:
+            try:
+                self._wrapper = mmal.MMAL_PORT_BH_CB_T(wrapper)
+                mmal_check(
+                    mmal.mmal_port_enable(self._port, self._wrapper),
+                    prefix="Unable to enable port %s" % self.name)
+                # If this port is an output port, send it all the buffers
+                # in the pool. If it's an input port, don't bother: the user
+                # will presumably want to feed buffers to it manually
+                if self._port[0].type == mmal.MMAL_PORT_TYPE_OUTPUT:
                     self._pool.send_all_buffers(block=False)
-                except:
-                    self._pool.close()
-                    self._pool = None
-                    raise
+            except:
+                self._pool.close()
+                self._pool = None
+                self._stopped = True
+                raise
         else:
             super(MMALPort, self).enable()
 
@@ -1443,20 +1605,21 @@ class MMALBuffer(object):
                 ct.byref(buf, self._buf[0].offset),
                 self._buf[0].length)
     def _set_data(self, value):
-        if isinstance(value, memoryview) and (value.ndim > 1 or value.itemsize > 1):
-            value = value.cast('B')
-        data_len = len(value)
-        if data_len:
-            assert data_len <= self.size
-            bp = ct.c_uint8 * data_len
+        value_len = buffer_bytes(value)
+        if value_len:
+            if value_len > self.size:
+                raise PiCameraValueError(
+                    'data is too large for buffer (%d > %d)' % (
+                        value_len, self.size))
+            bp = ct.c_uint8 * value_len
             try:
                 sp = bp.from_buffer(value)
             except TypeError:
                 sp = bp.from_buffer_copy(value)
             with self as buf:
-                ct.memmove(buf, sp, data_len)
+                ct.memmove(buf, sp, value_len)
         self._buf[0].offset = 0
-        self._buf[0].length = data_len
+        self._buf[0].length = value_len
     data = property(_get_data, _set_data, doc="""\
         The data held in the buffer as a :class:`bytes` string. You can set
         this attribute to modify the data in the buffer. Acceptable values
@@ -1816,6 +1979,10 @@ class MMALBaseConnection(MMALObject):
             formats = ()
         self._source = source
         self._target = target
+        try:
+            iter(formats)
+        except TypeError:
+            formats = (formats,)
         self._negotiate_format(formats)
         source._connection = self
         target._connection = self
@@ -2038,6 +2205,8 @@ class MMALConnection(MMALBaseConnection):
         if self._callback is not None:
             self._wrapper = mmal.MMAL_CONNECTION_CALLBACK_T(wrapper)
             self._connection[0].callback = self._wrapper
+            self._source.params[mmal.MMAL_PARAMETER_ZERO_COPY] = True
+            self._target.params[mmal.MMAL_PARAMETER_ZERO_COPY] = True
         mmal_check(
             mmal.mmal_connection_enable(self._connection),
             prefix="Failed to enable connection")
@@ -2718,60 +2887,6 @@ class MMALPythonPort(MMALObject):
             # XXX If it's a format-change event?
             self._connection.target.send_buffer(buf)
 
-    def _format_changed(self, buf):
-        with buf as data:
-            event = mmal.mmal_event_format_changed_get(buf._buf)
-            if self._connection:
-                # Handle format change on the source output port, if any. We
-                # don't check the output port capabilities because it was the
-                # port that emitted the event change in the first case so it'd
-                # be odd if it didn't support them (or the format requested)!
-                output = self._connection._source
-                output.disable()
-                if isinstance(output, MMALPythonPort):
-                    mmal.mmal_format_copy(output._format, event[0].format)
-                else:
-                    mmal.mmal_format_copy(output._port[0].format, event[0].format)
-                output.commit()
-                output.buffer_count = (
-                    event[0].buffer_num_recommended
-                    if event[0].buffer_num_recommended > 0 else
-                    event[0].buffer_num_min)
-                output.buffer_size = (
-                    event[0].buffer_size_recommended
-                    if event[0].buffer_size_recommended > 0 else
-                    event[0].buffer_size_min)
-                if isinstance(output, MMALPythonPort):
-                    output.enable()
-                else:
-                    output.enable(self._connection._transfer)
-            # Now deal with the format change on this input port (this is only
-            # called from the owning component's background thread so we must
-            # be an input port)
-            try:
-                if not (self.capabilities & mmal.MMAL_PORT_CAPABILITY_SUPPORTS_EVENT_FORMAT_CHANGE):
-                    raise PiCameraMMALError(
-                        mmal.MMAL_EINVAL,
-                        'port %s does not support event change' % self.name)
-                mmal.mmal_format_copy(self._format, event[0].format)
-                self._owner()._commit_port(self)
-                self._pool.resize(
-                    event[0].buffer_num_recommended
-                    if event[0].buffer_num_recommended > 0 else
-                    event[0].buffer_num_min,
-                    event[0].buffer_size_recommended
-                    if event[0].buffer_size_recommended > 0 else
-                    event[0].buffer_size_min)
-                self._buffer_count = len(self._pool)
-                self._buffer_size = self._pool[0].size
-            except:
-                # If this port can't handle the format change, or if anything goes
-                # wrong (like the owning component doesn't like the new format)
-                # stop the pipeline (from here at least)
-                if self._connection:
-                    self._connection.disable()
-                raise
-
     @property
     def name(self):
         return '%s:%s:%d' % (self._owner().name, {
@@ -3101,9 +3216,10 @@ class MMALPythonComponent(MMALPythonBaseComponent):
     :meth:`disconnect` methods can be used to establish or break a connection
     from the input port to an upstream component.
 
-    Override the :meth:`_callback` method to respond to buffers sent to the
-    input port, and the :meth:`_commit_port` method to control what formats
-    and framesizes the component works with.
+    Typically descendents will override the :meth:`_handle_frame` method to
+    respond to buffers sent to the input port, and will set
+    :attr:`MMALPythonPort.supported_formats` in the constructor to define the
+    formats that the component will work with.
     """
     __slots__ = ('_name', '_thread', '_queue', '_error')
 
@@ -3206,37 +3322,150 @@ class MMALPythonComponent(MMALPythonBaseComponent):
                 buf = self._queue.get(timeout=0.1)
                 if buf:
                     try:
-                        if buf.command == mmal.MMAL_EVENT_FORMAT_CHANGED:
-                            self.inputs[0]._format_changed(buf)
-                            # Chain the format-change onward so everything
-                            # downstream sees it. NOTE: the callback isn't given
-                            # the format-change because there's no image data in it
-                            for output in self.outputs:
-                                out_buf = output.get_buffer()
-                                out_buf.copy_from(buf)
-                                output.send_buffer(out_buf)
-                        else:
-                            if self._callback(self.inputs[0], buf):
-                                self._enabled = False
+                        handler = {
+                            0:                                 self._handle_frame,
+                            mmal.MMAL_EVENT_PARAMETER_CHANGED: self._handle_parameter_changed,
+                            mmal.MMAL_EVENT_FORMAT_CHANGED:    self._handle_format_changed,
+                            mmal.MMAL_EVENT_ERROR:             self._handle_error,
+                            mmal.MMAL_EVENT_EOS:               self._handle_end_of_stream,
+                            }[buf.command]
+                        if handler(self.inputs[0], buf):
+                            self._enabled = False
                     finally:
                         buf.release()
         except Exception as e:
             self._error = e
             self._enabled = False
 
-    def _callback(self, port, buf):
+    def _handle_frame(self, port, buf):
         """
-        Stub for descendents to override. This will be called with each buffer
-        sent to the input port.
+        Handles frame data buffers (where :attr:`MMALBuffer.command` is set to
+        0).
 
-        If the component has output ports, the method is expected to fetch a
-        buffer from the output port(s), write data into them, and send them
-        back to their respective ports.
+        Typically, if the component has output ports, the method is expected to
+        fetch a buffer from the output port(s), write data into them, and send
+        them back to their respective ports.
 
-        Return values are as for normal port callbacks (``True`` when no more
+        Return values are as for normal event handlers (``True`` when no more
         buffers are expected, ``False`` otherwise).
         """
         return False
+
+    def _handle_format_changed(self, port, buf):
+        """
+        Handles format change events passed to the component (where
+        :attr:`MMALBuffer.command` is set to MMAL_EVENT_FORMAT_CHANGED).
+
+        The default implementation re-configures the input port of the
+        component and emits the event on all output ports for downstream
+        processing. Override this method if you wish to do something else in
+        response to format change events.
+
+        The *port* parameter is the port into which the event arrived, and
+        *buf* contains the event itself (a MMAL_EVENT_FORMAT_CHANGED_T
+        structure). Use ``mmal_event_format_changed_get`` on the buffer's data
+        to extract the event.
+        """
+        with buf as data:
+            event = mmal.mmal_event_format_changed_get(buf._buf)
+            if port.connection:
+                # Handle format change on the source output port, if any. We
+                # don't check the output port capabilities because it was the
+                # port that emitted the format change in the first case so it'd
+                # be odd if it didn't support them (or the format requested)!
+                output = port.connection._source
+                output.disable()
+                if isinstance(output, MMALPythonPort):
+                    mmal.mmal_format_copy(output._format, event[0].format)
+                else:
+                    mmal.mmal_format_copy(output._port[0].format, event[0].format)
+                output.commit()
+                output.buffer_count = (
+                    event[0].buffer_num_recommended
+                    if event[0].buffer_num_recommended > 0 else
+                    event[0].buffer_num_min)
+                output.buffer_size = (
+                    event[0].buffer_size_recommended
+                    if event[0].buffer_size_recommended > 0 else
+                    event[0].buffer_size_min)
+                if isinstance(output, MMALPythonPort):
+                    output.enable()
+                else:
+                    output.enable(port.connection._transfer)
+            # Now deal with the format change on this input port (this is only
+            # called from _thread_run so port must be an input port)
+            try:
+                if not (port.capabilities & mmal.MMAL_PORT_CAPABILITY_SUPPORTS_EVENT_FORMAT_CHANGE):
+                    raise PiCameraMMALError(
+                        mmal.MMAL_EINVAL,
+                        'port %s does not support event change' % self.name)
+                mmal.mmal_format_copy(port._format, event[0].format)
+                self._commit_port(port)
+                port.pool.resize(
+                    event[0].buffer_num_recommended
+                    if event[0].buffer_num_recommended > 0 else
+                    event[0].buffer_num_min,
+                    event[0].buffer_size_recommended
+                    if event[0].buffer_size_recommended > 0 else
+                    event[0].buffer_size_min)
+                port.buffer_count = len(port.pool)
+                port.buffer_size = port.pool[0].size
+            except:
+                # If this port can't handle the format change, or if anything goes
+                # wrong (like the owning component doesn't like the new format)
+                # stop the pipeline (from here at least)
+                if port.connection:
+                    port.connection.disable()
+                raise
+        # Chain the format-change onward so everything downstream sees it.
+        # NOTE: the callback isn't given the format-change because there's no
+        # image data in it
+        for output in self.outputs:
+            out_buf = output.get_buffer()
+            out_buf.copy_from(buf)
+            output.send_buffer(out_buf)
+        return False
+
+    def _handle_parameter_changed(self, port, buf):
+        """
+        Handles parameter change events passed to the component (where
+        :attr:`MMALBuffer.command` is set to MMAL_EVENT_PARAMETER_CHANGED).
+
+        The default implementation does nothing but return ``False``
+        (indicating that processing should continue). Override this in
+        descendents to respond to parameter changes.
+
+        The *port* parameter is the port into which the event arrived, and
+        *buf* contains the event itself (a MMAL_EVENT_PARAMETER_CHANGED_T
+        structure).
+        """
+        return False
+
+    def _handle_error(self, port, buf):
+        """
+        Handles error notifications passed to the component (where
+        :attr:`MMALBuffer.command` is set to MMAL_EVENT_ERROR).
+
+        The default implementation does nothing but return ``True`` (indicating
+        that processing should halt). Override this in descendents to respond
+        to error events.
+
+        The *port* parameter is the port into which the event arrived.
+        """
+        return True
+
+    def _handle_end_of_stream(self, port, buf):
+        """
+        Handles end-of-stream notifications passed to the component (where
+        :attr:`MMALBuffer.command` is set to MMAL_EVENT_EOS).
+
+        The default implementation does nothing but return ``True`` (indicating
+        that processing should halt). Override this in descendents to respond
+        to the end of stream.
+
+        The *port* parameter is the port into which the event arrived.
+        """
+        return True
 
 
 class MMALPythonTarget(MMALPythonComponent):
@@ -3295,7 +3524,7 @@ class MMALPythonTarget(MMALPythonComponent):
         """
         return self._event.wait(timeout)
 
-    def _callback(self, port, buf):
+    def _handle_frame(self, port, buf):
         self._stream.write(buf.data)
         if buf.flags & self._done:
             self._event.set()
@@ -3382,6 +3611,7 @@ class MMALPythonConnection(MMALBaseConnection):
             else:
                 # Connected MMAL input ports don't know they're connected so
                 # provide a dummy callback
+                self._target.params[mmal.MMAL_PARAMETER_ZERO_COPY] = True
                 self._target.enable(lambda port, buf: True)
             if isinstance(self._source, MMALPythonPort):
                 # Connected python output ports are nothing more than thin
@@ -3390,6 +3620,7 @@ class MMALPythonConnection(MMALBaseConnection):
             else:
                 # Connected MMAL output ports are made to transfer their
                 # data to the Python input port
+                self._source.params[mmal.MMAL_PARAMETER_ZERO_COPY] = True
                 self._source.enable(self._transfer)
 
     def disable(self):
