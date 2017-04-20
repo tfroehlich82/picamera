@@ -33,6 +33,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
 import setup as _setup
+import datetime as dt
 
 # Mock out certain modules while building documentation
 class Mock(object):
@@ -85,7 +86,7 @@ source_suffix = '.rst'
 #source_encoding = 'utf-8-sig'
 master_doc = 'index'
 project = _setup.__project__.title()
-copyright = '2013-2016 %s' % _setup.__author__
+copyright = '2013-%d %s' % (dt.datetime.now().year, _setup.__author__)
 version = _setup.__version__
 release = _setup.__version__
 #language = None
